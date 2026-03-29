@@ -784,6 +784,14 @@ button {
   min-height: 140px;
 }
 
+.pattern-thread {
+  margin-top: 6px;
+}
+
+.pattern-thread .message {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .explore-options.stacked .option-chip {
   padding: 12px 14px;
   line-height: 1.5;
@@ -1172,10 +1180,20 @@ button {
 
   .detail-actions {
     flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .entry-browser {
     position: static;
+    max-height: none;
+  }
+
+  .entries-layout.detail-open .entry-browser {
+    display: none;
+  }
+
+  .entries-layout.list-open .detail-panel {
+    display: none;
   }
 
   .entry-browser-header {
@@ -1193,6 +1211,23 @@ button {
 
   .entry-row-meta {
     justify-content: flex-start;
+  }
+
+  .detail-panel {
+    width: 100%;
+  }
+
+  .detail-surface {
+    padding: 20px 18px;
+  }
+
+  .detail-surface h2 {
+    max-width: 100%;
+    font-size: clamp(1.45rem, 8vw, 2rem);
+  }
+
+  .detail-reading-column {
+    max-width: 100%;
   }
 
   .pattern-column.wide .pattern-items {
@@ -1213,6 +1248,12 @@ button {
 
   .pattern-focus-actions {
     flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .patterns-shell.detail-mode .patterns-list.compact {
+    position: static;
+    order: 2;
   }
 
   .photo-upload-header,
@@ -1228,5 +1269,10 @@ button {
 
   .photo-page-actions {
     align-self: flex-end;
+  }
+
+  .pattern-chat .primary-button {
+    align-self: stretch;
+    justify-content: center;
   }
 }

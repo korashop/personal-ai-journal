@@ -34,16 +34,29 @@ type PatternsViewProps = {
   onRefreshAfterThemeReply: () => Promise<void>
 }
 
+type ThemeMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterThemeReply, patterns }: PatternsViewProps) {
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
   const [message, setMessage] = useState('')
-  const [reply, setReply] = useState<string | null>(null)
+  const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    setSelectedPatternId(null)
-  }, [patterns])
+    if (!patterns.length) {
+      setSelectedPatternId(null)
+      return
+    }
+    if (!selectedPatternId) return
+    if (!patterns.some((pattern) => pattern.id === selectedPatternId)) {
+      setSelectedPatternId(null)
+    }
+  }, [patterns, selectedPatternId])
 
   const selectedPattern = useMemo(
     () => (selectedPatternId ? patterns.find((pattern) => pattern.id === selectedPatternId) ?? null : null),
@@ -55,6 +68,11 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
     [entries, selectedPattern],
   )
 
+  const selectedThread = useMemo(
+    () => (selectedPattern ? themeThreads[selectedPattern.id] ?? [] : []),
+    [selectedPattern, themeThreads],
+  )
+
   const latestSupportingEntry = useMemo(() => {
     return [...supportingEntries].sort(
       (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
@@ -64,11 +82,33 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedPattern || !message.trim()) return
+    const question = message.trim()
     try {
       setBusy(true)
-      const response = await createPatternReply(selectedPattern, message.trim())
-      setReply(response.answer)
+      setThemeThreads((current) => ({
+        ...current,
+        [selectedPattern.id]: [
+          ...(current[selectedPattern.id] ?? []),
+          {
+            id: `${selectedPattern.id}-user-${Date.now()}`,
+            role: 'user',
+            content: question,
+          },
+        ],
+      }))
       setMessage('')
+      const response = await createPatternReply(selectedPattern, question)
+      setThemeThreads((current) => ({
+        ...current,
+        [selectedPattern.id]: [
+          ...(current[selectedPattern.id] ?? []),
+          {
+            id: `${selectedPattern.id}-assistant-${Date.now()}`,
+            role: 'assistant',
+            content: response.answer,
+          },
+        ],
+      }))
       await onRefreshAfterThemeReply()
     } finally {
       setBusy(false)
@@ -230,12 +270,18 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
               </button>
             </form>
 
-            {reply ? (
-              <article className="pattern-reply">
-                <p className="subtle-label">Theme response</p>
-                <ReactMarkdown>{reply}</ReactMarkdown>
+            {selectedThread.length ? (
+              <div className="conversation-list pattern-thread">
+                {selectedThread.map((threadMessage) => (
+                  <article className={`message ${threadMessage.role}`} key={threadMessage.id}>
+                    <div className="message-meta">
+                      <span>{threadMessage.role === 'user' ? 'You' : 'Theme'}</span>
+                    </div>
+                    <ReactMarkdown>{threadMessage.content}</ReactMarkdown>
+                  </article>
+                ))}
                 <p className="muted pattern-reply-note">This exchange has been folded back into the living memory and theme state.</p>
-              </article>
+              </div>
             ) : null}
 
           </div>
