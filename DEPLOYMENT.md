@@ -2,7 +2,7 @@
 
 ## Recommended path
 
-For now, the simplest deployment path is a single Railway service:
+For now, the simplest deployment path is a single Railway service using the included Dockerfile:
 
 - backend: Express API
 - frontend: built Vite assets served by the same Express server
@@ -13,8 +13,8 @@ That means one public URL can handle both the app UI and the API.
 ## What is already prepared
 
 - The server now serves the built frontend from `dist/` in production.
-- A basic Railway config exists in [`railway.json`](/Users/arifine/Documents/New%20project/railway.json).
-- The repo now requests a Vite-compatible Node runtime for hosting environments like Railway.
+- Railway is configured to deploy from the included [`Dockerfile`](/Users/arifine/Documents/New%20project/Dockerfile), which pins a Vite-compatible Node version directly.
+- A Railway config exists in [`railway.json`](/Users/arifine/Documents/New%20project/railway.json).
 
 ## Railway steps
 
@@ -39,3 +39,4 @@ That means one public URL can handle both the app UI and the API.
 - Once deployed, photo capture from phone browser becomes much more natural.
 - If you later want stronger auth/multi-user support, we can revisit hosting shape.
 - Railway can use `GET /api/health` as a basic health check.
+- If Railway was previously using an older failed Nixpacks build, redeploy after pushing the Dockerfile changes so it rebuilds with the new strategy.

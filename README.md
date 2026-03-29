@@ -45,3 +45,4 @@ Create a private storage bucket named `journal-photos` or change `SUPABASE_STORA
 - If the `pattern_threads` table has not been migrated yet, the app will still work, but pattern continuity will fall back to in-memory / generated behavior instead of durable storage.
 - Deployment notes live in [`DEPLOYMENT.md`](/Users/arifine/Documents/New%20project/DEPLOYMENT.md).
 - In production on a single host, leave `VITE_API_BASE_URL` unset so the frontend talks to the same-origin API automatically.
+- Railway deployment now uses the included [`Dockerfile`](/Users/arifine/Documents/New%20project/Dockerfile) instead of relying on platform-selected Node versions.

@@ -1,8 +1,0 @@
-[variables]
-NPM_CONFIG_INCLUDE = "optional"
-
-[phases.setup]
-nixPkgs = ["nodejs_20"]
-
-[phases.install]
-cmds = ["npm install"]
