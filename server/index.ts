@@ -1,0 +1,397 @@
+import cors from 'cors'
+import express from 'express'
+import multer from 'multer'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { z } from 'zod'
+
+import { config } from './config.js'
+import {
+  buildEntryTitle,
+  buildPatterns,
+  buildSummary,
+  chooseResurfacingCard,
+  generateAnalysis,
+  generatePatternReply,
+  generateReply,
+  integratePatternReplyIntoMemory,
+  inferTags,
+  rewriteMemoryDoc,
+  transcribeJournalPhotosWithStatus,
+} from './lib/ai.js'
+import { getStore, isLiveStore } from './lib/store.js'
+
+const app = express()
+const upload = multer({ storage: multer.memoryStorage() })
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const frontendDistPath = join(__dirname, '../dist')
+
+app.use(cors())
+app.use(express.json({ limit: '4mb' }))
+
+const createEntrySchema = z.object({
+  rawText: z.string().default(''),
+  source: z.enum(['typed', 'paste', 'photo']),
+  transcribedText: z.string().optional(),
+  userId: z.string().optional(),
+})
+
+const createConversationSchema = z.object({
+  entryId: z.string().min(1),
+  content: z.string().min(1),
+  userId: z.string().optional(),
+})
+
+const updateEntrySchema = z.object({
+  rawText: z.string().min(1),
+  userId: z.string().optional(),
+})
+
+const patternReplySchema = z.object({
+  pattern: z.object({
+    id: z.string(),
+    title: z.string(),
+    overview: z.string(),
+    status: z.enum(['emerging', 'active', 'deepening']).optional(),
+    dimensions: z.array(z.string()),
+    questions: z.array(z.string()),
+    exploreOptions: z.array(z.string()),
+    entryIds: z.array(z.string()),
+    entryCount: z.number().optional(),
+    updatedAt: z.string().optional(),
+  }),
+  content: z.string().min(1),
+  userId: z.string().optional(),
+})
+
+async function refreshDerivedState(userId: string) {
+  const { store } = getStore()
+  const bootstrap = await store.getBootstrap(userId)
+  const recentEntries = bootstrap.patternEntries
+  const memoryContent = await rewriteMemoryDoc(bootstrap.memoryDoc, recentEntries.slice(0, 8))
+  await store.updateMemory(userId, memoryContent)
+  const nextBootstrap = await store.getBootstrap(userId)
+  const patterns = await buildPatterns(nextBootstrap.memoryDoc, nextBootstrap.patternEntries, nextBootstrap.patterns)
+  await store.updatePatterns(userId, patterns)
+}
+
+app.get('/api/health', (_request, response) => {
+  response.json({ ok: true })
+})
+
+app.get('/api/bootstrap', async (request, response, next) => {
+  try {
+    const { mode, store } = getStore()
+    const selectedEntryId = typeof request.query.entryId === 'string' ? request.query.entryId : null
+    const data = await store.getBootstrap(config.demoUserId, selectedEntryId)
+    const patterns = data.patterns.length ? data.patterns : await buildPatterns(data.memoryDoc, data.patternEntries, [])
+
+    if (!data.patterns.length && patterns.length) {
+      void store.updatePatterns(config.demoUserId, patterns)
+    }
+
+    response.json({
+      entries: data.entries,
+      selectedEntry: data.selectedEntry,
+      memoryDoc: data.memoryDoc,
+      resurfacing: chooseResurfacingCard(
+        data.memoryDoc,
+        data.selectedEntry ? [data.selectedEntry] : [],
+        data.highlights,
+      ),
+      patterns,
+      mode,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/entries', upload.array('photos', 12), async (request, response, next) => {
+  try {
+    const parsed = createEntrySchema.parse(request.body)
+    const { store } = getStore()
+    const userId = parsed.userId ?? config.demoUserId
+    const bootstrap = await store.getBootstrap(userId)
+    const files = (request.files as Express.Multer.File[] | undefined) ?? []
+
+    if (!parsed.rawText.trim() && files.length === 0) {
+      response.status(400).json({ error: 'Add text or at least one image before submitting.' })
+      return
+    }
+
+    let rawText = parsed.rawText.trim()
+    let photoUrls: string[] = []
+
+    if (files.length && isLiveStore(store)) {
+      photoUrls = await store.uploadPhotos(userId, files)
+    } else if (files.length) {
+      photoUrls = files.map((file) => `mock://${file.originalname}`)
+    }
+
+    if (files.length) {
+      const transcription = parsed.transcribedText?.trim()
+        ? {
+            transcript: parsed.transcribedText.trim(),
+            anySucceeded: true,
+            failedCount: 0,
+          }
+        : await transcribeJournalPhotosWithStatus(files)
+
+      if (!transcription.anySucceeded && !rawText.trim()) {
+        response.status(400).json({
+          error: 'The app could not read those images well enough to create a trustworthy entry. Try JPG/PNG, or add a little typed context before submitting.',
+        })
+        return
+      }
+
+      rawText = rawText ? `${rawText}\n\n---\n\n${transcription.transcript}` : transcription.transcript
+    }
+
+    const tags = inferTags(rawText)
+    const analysis = await generateAnalysis(rawText, tags, {
+      memoryDoc: bootstrap.memoryDoc,
+      recentEntries: bootstrap.patternEntries.slice(0, 5),
+      relevantHighlights: bootstrap.highlights.slice(0, 3),
+    })
+
+    const entry = await store.createEntry({
+      rawText,
+      source: files.length ? 'photo' : parsed.source,
+      title: analysis.title || buildEntryTitle(rawText, tags),
+      tags,
+      summary: analysis.summary || buildSummary(rawText),
+      photoUrls,
+      userId,
+      analysis,
+    })
+
+    await refreshDerivedState(userId)
+
+    response.status(201).json(entry)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/transcribe-photos', upload.array('photos', 12), async (request, response, next) => {
+  try {
+    const files = (request.files as Express.Multer.File[] | undefined) ?? []
+
+    if (!files.length) {
+      response.status(400).json({ error: 'Add at least one image to transcribe.' })
+      return
+    }
+
+    const result = await transcribeJournalPhotosWithStatus(files)
+
+    response.json({
+      transcript: result.transcript,
+      anySucceeded: result.anySucceeded,
+      failedCount: result.failedCount,
+      imageCount: files.length,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/conversations', async (request, response, next) => {
+  try {
+    const parsed = createConversationSchema.parse(request.body)
+    const { store } = getStore()
+    const userId = parsed.userId ?? config.demoUserId
+    const bootstrap = await store.getBootstrap(userId)
+    const entry = bootstrap.selectedEntry && bootstrap.selectedEntry.id === parsed.entryId
+      ? bootstrap.selectedEntry
+      : await store.getEntryView(parsed.entryId, userId)
+
+    if (!entry) {
+      response.status(404).json({ error: 'Entry not found' })
+      return
+    }
+
+    const assistantContent = await generateReply(entry, parsed.content, {
+        memoryDoc: bootstrap.memoryDoc,
+        recentEntries: bootstrap.patternEntries.slice(0, 5),
+        relevantHighlights: bootstrap.highlights.slice(0, 3),
+      })
+
+    const updatedEntry = await store.appendConversation(
+      parsed.entryId,
+      userId,
+      parsed.content,
+      assistantContent,
+    )
+
+    await refreshDerivedState(userId)
+
+    response.json(updatedEntry)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.patch('/api/entries/:entryId', async (request, response, next) => {
+  try {
+    const parsed = updateEntrySchema.parse(request.body)
+    const { store } = getStore()
+    const userId = parsed.userId ?? config.demoUserId
+    const bootstrap = await store.getBootstrap(userId)
+    const entry = bootstrap.selectedEntry && bootstrap.selectedEntry.id === request.params.entryId
+      ? bootstrap.selectedEntry
+      : await store.getEntryView(request.params.entryId, userId)
+
+    if (!entry) {
+      response.status(404).json({ error: 'Entry not found' })
+      return
+    }
+
+    const tags = inferTags(parsed.rawText)
+    const analysis = await generateAnalysis(parsed.rawText, tags, {
+      memoryDoc: bootstrap.memoryDoc,
+      recentEntries: bootstrap.patternEntries.filter((item) => item.id !== entry.id).slice(0, 5),
+      relevantHighlights: bootstrap.highlights.slice(0, 3),
+    })
+
+    const updatedEntry = await store.updateEntry({
+      entryId: entry.id,
+      userId,
+      rawText: parsed.rawText,
+      title: analysis.title || buildEntryTitle(parsed.rawText, tags),
+      tags,
+      summary: analysis.summary || buildSummary(parsed.rawText),
+      analysis,
+    })
+
+    await refreshDerivedState(userId)
+
+    response.json(updatedEntry)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
+  try {
+    const userId = typeof request.body?.userId === 'string' ? request.body.userId : config.demoUserId
+    const { store } = getStore()
+    const bootstrap = await store.getBootstrap(userId)
+    const entry = bootstrap.selectedEntry && bootstrap.selectedEntry.id === request.params.entryId
+      ? bootstrap.selectedEntry
+      : await store.getEntryView(request.params.entryId, userId)
+
+    if (!entry) {
+      response.status(404).json({ error: 'Entry not found' })
+      return
+    }
+
+    const analysis = await generateAnalysis(entry.rawText, entry.tags, {
+      memoryDoc: bootstrap.memoryDoc,
+      recentEntries: bootstrap.patternEntries.filter((item) => item.id !== entry.id).slice(0, 5),
+      relevantHighlights: bootstrap.highlights.slice(0, 3),
+    })
+
+    const updatedEntry = await store.updateEntry({
+      entryId: entry.id,
+      userId,
+      rawText: entry.rawText,
+      title: analysis.title || buildEntryTitle(entry.rawText, entry.tags),
+      tags: entry.tags,
+      summary: analysis.summary || buildSummary(entry.rawText),
+      analysis,
+    })
+
+    await refreshDerivedState(userId)
+
+    response.json(updatedEntry)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/entries/:entryId', async (request, response, next) => {
+  try {
+    const userId = typeof request.query.userId === 'string' ? request.query.userId : config.demoUserId
+    const { store } = getStore()
+    const entry = await store.getEntryView(request.params.entryId, userId)
+    response.json(entry)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/entries/:entryId', async (request, response, next) => {
+  try {
+    const userId = typeof request.query.userId === 'string' ? request.query.userId : config.demoUserId
+    const { store } = getStore()
+    await store.deleteEntry(request.params.entryId, userId)
+    await refreshDerivedState(userId)
+    response.status(204).send()
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/patterns/reply', async (request, response, next) => {
+  try {
+    const parsed = patternReplySchema.parse(request.body)
+    const userId = parsed.userId ?? config.demoUserId
+    const { store } = getStore()
+    const bootstrap = await store.getBootstrap(userId)
+    const relatedEntries = bootstrap.entries
+      .filter((entry) => parsed.pattern.entryIds.includes(entry.id))
+
+    const relatedEntryDetails = await Promise.all(relatedEntries.map((entry) => store.getEntryView(entry.id, userId)))
+    const relatedPatternEntries = relatedEntryDetails.map(({ conversation, ...item }) => item)
+
+    const answer = await generatePatternReply(
+      {
+        ...parsed.pattern,
+        status: parsed.pattern.status ?? 'active',
+        entryCount: parsed.pattern.entryCount ?? parsed.pattern.entryIds.length,
+        updatedAt: parsed.pattern.updatedAt ?? new Date().toISOString(),
+      },
+      relatedPatternEntries,
+      bootstrap.memoryDoc,
+      parsed.content,
+    )
+    const nextMemory = await integratePatternReplyIntoMemory(
+      bootstrap.memoryDoc,
+      {
+        ...parsed.pattern,
+        status: parsed.pattern.status ?? 'active',
+        entryCount: parsed.pattern.entryCount ?? parsed.pattern.entryIds.length,
+        updatedAt: parsed.pattern.updatedAt ?? new Date().toISOString(),
+      },
+      parsed.content,
+      answer,
+    )
+
+    const memoryDoc = await store.updateMemory(userId, nextMemory)
+    const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, bootstrap.patterns)
+    await store.updatePatterns(userId, patterns)
+
+    response.json({ answer, memoryDoc, patterns })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+  const message = error instanceof Error ? error.message : 'Something went wrong'
+  response.status(500).json({ error: message })
+})
+
+if (existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath))
+
+  app.get(/^(?!\/api).*/, (_request, response) => {
+    response.sendFile(join(frontendDistPath, 'index.html'))
+  })
+}
+
+app.listen(config.port, () => {
+  console.log(`Personal AI Journal server listening on http://localhost:${config.port}`)
+})
