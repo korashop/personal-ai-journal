@@ -77,6 +77,12 @@ async function refreshDerivedState(userId: string) {
   await store.updatePatterns(userId, patterns)
 }
 
+function triggerDerivedRefresh(userId: string) {
+  void refreshDerivedState(userId).catch((error) => {
+    console.error('Derived refresh failed', error)
+  })
+}
+
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true })
 })
@@ -169,9 +175,8 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
       analysis,
     })
 
-    await refreshDerivedState(userId)
-
     response.status(201).json(entry)
+    triggerDerivedRefresh(userId)
   } catch (error) {
     next(error)
   }
@@ -227,9 +232,8 @@ app.post('/api/conversations', async (request, response, next) => {
       assistantContent,
     )
 
-    await refreshDerivedState(userId)
-
     response.json(updatedEntry)
+    triggerDerivedRefresh(userId)
   } catch (error) {
     next(error)
   }
@@ -268,9 +272,8 @@ app.patch('/api/entries/:entryId', async (request, response, next) => {
       analysis,
     })
 
-    await refreshDerivedState(userId)
-
     response.json(updatedEntry)
+    triggerDerivedRefresh(userId)
   } catch (error) {
     next(error)
   }
@@ -308,9 +311,8 @@ app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
       analysis,
     })
 
-    await refreshDerivedState(userId)
-
     response.json(updatedEntry)
+    triggerDerivedRefresh(userId)
   } catch (error) {
     next(error)
   }
@@ -332,8 +334,8 @@ app.delete('/api/entries/:entryId', async (request, response, next) => {
     const userId = typeof request.query.userId === 'string' ? request.query.userId : config.demoUserId
     const { store } = getStore()
     await store.deleteEntry(request.params.entryId, userId)
-    await refreshDerivedState(userId)
     response.status(204).send()
+    triggerDerivedRefresh(userId)
   } catch (error) {
     next(error)
   }

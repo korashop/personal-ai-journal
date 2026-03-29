@@ -647,15 +647,17 @@ Return JSON only:
 ]
 
 Rules:
-- 3 to 5 themes when there are enough distinct recurring strands. It is okay to return only 2 if the journal truly clusters around 2 durable themes.
+- Return the real set of important themes. Do not target a number for its own sake.
 - Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
 - Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
 - Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
 - Preserve continuity in major themes. If an existing theme is still active, prefer refining it rather than inventing a brand new title.
-- Do not create a theme unless it seems to persist across multiple entries or materially shapes the user's thinking.
-- It is better to return 2 honest themes than 5 weak ones.
+- Create a theme when it seems genuinely important, durable, or central to the user's thinking, even if it is newly emerging.
+- Do not inflate the list with weak themes just to have more themes.
 - Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
-- If there are multiple durable strands, prefer separating them cleanly rather than collapsing everything into one broad theme.
+- If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
+- Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
+- Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
 - Themes can vary in depth.
 - Use only entry IDs that are provided below.
 - Do not just repeat entry text. Synthesize.
