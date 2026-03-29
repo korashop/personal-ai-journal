@@ -227,7 +227,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
           />
           <div className="capture-steps">
             <span className={`capture-step ${photos.length ? 'done' : ''}`}>1. Add pages</span>
-            <span className={`capture-step ${reviewReady ? 'done' : photos.length ? 'active' : ''}`}>2. Review transcription</span>
+            <span className={`capture-step ${reviewReady ? 'done' : photos.length ? 'active' : ''}`}>2. Transcribe images</span>
             <span className={`capture-step ${reviewReady ? 'active' : ''}`}>3. Submit entry</span>
           </div>
           {photos.length ? (
@@ -258,7 +258,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
             <div className="photo-review-actions">
               <button className="ghost-button" disabled={reviewBusy} onClick={() => void handleReviewTranscription()} type="button">
                 {reviewBusy ? <LoaderCircle className="spin" size={16} /> : <FileText size={16} />}
-                {reviewBusy ? 'Reading photos...' : reviewReady ? 'Re-run transcription' : 'Review transcription'}
+                {reviewBusy ? 'Reading photos...' : reviewReady ? 'Re-transcribe images' : 'Transcribe images'}
               </button>
               {reviewMeta ? (
                 <span className="hint">
@@ -267,7 +267,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
                     : `Read ${reviewMeta.imageCount}/${reviewMeta.imageCount} images`}
                 </span>
               ) : (
-                <span className="hint">Click review transcription before submitting.</span>
+                <span className="hint">Click transcribe images before submitting.</span>
               )}
             </div>
           ) : null}

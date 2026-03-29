@@ -69,6 +69,17 @@ export function sanitizeJournalText(text: string) {
     .join('\n')
 }
 
+export function buildAnalysisInput(text: string) {
+  return sanitizeJournalText(text)
+    .split('\n')
+    .map((line) => line.replace(/^page\s+\d+\s*$/i, ''))
+    .map((line) => line.replace(/^image\s+\d+\s*[-–]\s*.+$/i, ''))
+    .map((line) => line.replace(/\[unclear\]/gi, ''))
+    .map((line) => line.replace(/\s{2,}/g, ' ').trim())
+    .filter((line) => line && !/^\[ocr unavailable.*\]$/i.test(line))
+    .join('\n')
+}
+
 function looksLikeScaffolding(text: string) {
   const lower = stripBoilerplate(text).toLowerCase()
   return (
@@ -158,13 +169,13 @@ export function inferTags(rawText: string) {
 }
 
 export function buildSummary(rawText: string) {
-  const cleaned = stripBoilerplate(rawText)
+  const cleaned = stripBoilerplate(buildAnalysisInput(rawText) || rawText)
   const firstTwoSentences = cleaned.match(/(.+?[.!?](?:\s+.+?[.!?])?)/)?.[1]?.trim() ?? cleaned
   return clip(firstTwoSentences, 180)
 }
 
 function buildContextBullets(rawText: string) {
-  const cleaned = sanitizeJournalText(rawText)
+  const cleaned = buildAnalysisInput(rawText)
     .split('\n')
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean)
@@ -187,7 +198,7 @@ function buildFeedLabels(tags: string[], rawText: string, sections: Array<{ titl
 }
 
 export function buildEntryTitle(rawText: string, tags: string[]) {
-  const clean = normalizeWhitespace(rawText)
+  const clean = normalizeWhitespace(buildAnalysisInput(rawText) || rawText)
   const base = stripBoilerplate(clean) || clean
 
   if (!base) {
@@ -221,7 +232,7 @@ export function buildEntryTitle(rawText: string, tags: string[]) {
 }
 
 function fallbackAnalysis(rawText: string, tags: string[]): AnalysisPayload {
-  const cleanedRaw = sanitizeJournalText(rawText)
+  const cleanedRaw = buildAnalysisInput(rawText)
   const summary = buildSummary(cleanedRaw || rawText)
   const hasOnlyScaffolding = !cleanedRaw.trim()
   const sections = [
@@ -636,13 +647,15 @@ Return JSON only:
 ]
 
 Rules:
-- 1 to 4 themes max.
+- 3 to 5 themes when there are enough distinct recurring strands. It is okay to return only 2 if the journal truly clusters around 2 durable themes.
 - Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
 - Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
 - Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
 - Preserve continuity in major themes. If an existing theme is still active, prefer refining it rather than inventing a brand new title.
 - Do not create a theme unless it seems to persist across multiple entries or materially shapes the user's thinking.
 - It is better to return 2 honest themes than 5 weak ones.
+- Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
+- If there are multiple durable strands, prefer separating them cleanly rather than collapsing everything into one broad theme.
 - Themes can vary in depth.
 - Use only entry IDs that are provided below.
 - Do not just repeat entry text. Synthesize.
@@ -884,6 +897,7 @@ async function cleanTranscription(text: string) {
 Rules:
 - Return only the cleaned transcription.
 - Remove generic headings like "Transcribed Journal Page".
+- Do not add file names or page labels to the transcription.
 - Preserve meaning, tone, and paragraph breaks.
 - Fix obvious OCR mistakes only when highly confident.
 - Keep [unclear] markers when a word is genuinely uncertain.
@@ -997,12 +1011,12 @@ export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]):
 
         return {
           success: true,
-          section: `Image ${index + 1} - ${file.originalname}\n${cleaned || text}`,
+          section: `Page ${index + 1}\n${cleaned || text}`,
         }
       } catch {
         return {
           success: false,
-          section: `Image ${index + 1} - ${file.originalname}\n[OCR unavailable for this image]`,
+          section: `Page ${index + 1}\n[OCR unavailable for this image]`,
         }
       }
     }),

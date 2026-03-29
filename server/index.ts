@@ -8,6 +8,7 @@ import { z } from 'zod'
 
 import { config } from './config.js'
 import {
+  buildAnalysisInput,
   buildEntryTitle,
   buildPatterns,
   buildSummary,
@@ -149,8 +150,9 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
       rawText = rawText ? `${rawText}\n\n---\n\n${transcription.transcript}` : transcription.transcript
     }
 
-    const tags = inferTags(rawText)
-    const analysis = await generateAnalysis(rawText, tags, {
+    const analysisInput = buildAnalysisInput(rawText) || rawText
+    const tags = inferTags(analysisInput)
+    const analysis = await generateAnalysis(analysisInput, tags, {
       memoryDoc: bootstrap.memoryDoc,
       recentEntries: bootstrap.patternEntries.slice(0, 5),
       relevantHighlights: bootstrap.highlights.slice(0, 3),
@@ -159,9 +161,9 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
     const entry = await store.createEntry({
       rawText,
       source: files.length ? 'photo' : parsed.source,
-      title: analysis.title || buildEntryTitle(rawText, tags),
+      title: analysis.title || buildEntryTitle(analysisInput, tags),
       tags,
-      summary: analysis.summary || buildSummary(rawText),
+      summary: analysis.summary || buildSummary(analysisInput),
       photoUrls,
       userId,
       analysis,
@@ -248,8 +250,9 @@ app.patch('/api/entries/:entryId', async (request, response, next) => {
       return
     }
 
-    const tags = inferTags(parsed.rawText)
-    const analysis = await generateAnalysis(parsed.rawText, tags, {
+    const analysisInput = buildAnalysisInput(parsed.rawText) || parsed.rawText
+    const tags = inferTags(analysisInput)
+    const analysis = await generateAnalysis(analysisInput, tags, {
       memoryDoc: bootstrap.memoryDoc,
       recentEntries: bootstrap.patternEntries.filter((item) => item.id !== entry.id).slice(0, 5),
       relevantHighlights: bootstrap.highlights.slice(0, 3),
@@ -259,9 +262,9 @@ app.patch('/api/entries/:entryId', async (request, response, next) => {
       entryId: entry.id,
       userId,
       rawText: parsed.rawText,
-      title: analysis.title || buildEntryTitle(parsed.rawText, tags),
+      title: analysis.title || buildEntryTitle(analysisInput, tags),
       tags,
-      summary: analysis.summary || buildSummary(parsed.rawText),
+      summary: analysis.summary || buildSummary(analysisInput),
       analysis,
     })
 
@@ -287,7 +290,9 @@ app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
       return
     }
 
-    const analysis = await generateAnalysis(entry.rawText, entry.tags, {
+    const analysisInput = buildAnalysisInput(entry.rawText) || entry.rawText
+    const tags = inferTags(analysisInput)
+    const analysis = await generateAnalysis(analysisInput, tags, {
       memoryDoc: bootstrap.memoryDoc,
       recentEntries: bootstrap.patternEntries.filter((item) => item.id !== entry.id).slice(0, 5),
       relevantHighlights: bootstrap.highlights.slice(0, 3),
@@ -297,9 +302,9 @@ app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
       entryId: entry.id,
       userId,
       rawText: entry.rawText,
-      title: analysis.title || buildEntryTitle(entry.rawText, entry.tags),
-      tags: entry.tags,
-      summary: analysis.summary || buildSummary(entry.rawText),
+      title: analysis.title || buildEntryTitle(analysisInput, tags),
+      tags,
+      summary: analysis.summary || buildSummary(analysisInput),
       analysis,
     })
 

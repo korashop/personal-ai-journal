@@ -843,9 +843,9 @@ button {
 }
 
 .detail-surface h2 {
-  max-width: 14ch;
-  font-size: clamp(1.9rem, 4vw, 3.25rem);
-  line-height: 1.05;
+  max-width: 15ch;
+  font-size: clamp(1.65rem, 3.2vw, 2.6rem);
+  line-height: 1.08;
 }
 
 .detail-surface .detail-date {
