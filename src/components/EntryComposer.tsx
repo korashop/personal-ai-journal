@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, FileText, ImagePlus, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { DragEvent, FormEvent } from 'react'
 
 import { transcribePhotos } from '../lib/api'
 import type { EntrySource } from '../types'
@@ -20,6 +20,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
   const [reviewBusy, setReviewBusy] = useState(false)
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewMeta, setReviewMeta] = useState<{ imageCount: number; failedCount: number } | null>(null)
+  const [dragActive, setDragActive] = useState(false)
 
   function appendPhotos(nextFiles: File[]) {
     setPhotos((current) => {
@@ -91,6 +92,15 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
     }
   }
 
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setDragActive(false)
+    const nextPhotos = Array.from(event.dataTransfer.files ?? []).filter((file) => file.type.startsWith('image/'))
+    if (!nextPhotos.length) return
+    appendPhotos(nextPhotos)
+    setSource('photo')
+  }
+
   async function handleReviewTranscription() {
     if (!photos.length) return
 
@@ -160,13 +170,33 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
       />
 
       <div className="composer-footer">
-        <div className={`photo-upload ${photos.length ? 'has-photos' : ''}`}>
+        <div
+          className={`photo-upload ${photos.length ? 'has-photos' : ''} ${dragActive ? 'drag-active' : ''}`}
+          onDragEnter={(event) => {
+            event.preventDefault()
+            setDragActive(true)
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault()
+            if (event.currentTarget === event.target) {
+              setDragActive(false)
+            }
+          }}
+          onDragOver={(event) => {
+            event.preventDefault()
+            setDragActive(true)
+          }}
+          onDrop={handleDrop}
+        >
           <div className="photo-upload-header">
             <div>
               <p className="subtle-label">Journal pages</p>
               <h3>{photos.length ? `${photos.length} photo${photos.length > 1 ? 's' : ''} attached` : 'Add journal photos'}</h3>
               <p className="hint upload-sequence-hint">
                 Upload in reading order. The app transcribes in the order shown below.
+              </p>
+              <p className="hint upload-drop-hint">
+                Drag images here or use the picker. HEIC, JPG, and PNG are supported.
               </p>
             </div>
             <button

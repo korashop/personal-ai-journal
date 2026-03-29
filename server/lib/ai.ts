@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import convertHeic from 'heic-convert'
 import sharp from 'sharp'
 
 import { config, hasAnthropicConfig } from '../config.js'
@@ -910,12 +911,28 @@ async function preparePhotoForVision(file: UploadedPhoto): Promise<UploadedPhoto
     return file
   }
 
-  const jpegBuffer = await sharp(file.buffer).jpeg({ quality: 92 }).toBuffer()
+  try {
+    const jpegBuffer = Buffer.from(
+      await convertHeic({
+        buffer: file.buffer,
+        format: 'JPEG',
+        quality: 0.92,
+      }),
+    )
 
-  return {
-    buffer: jpegBuffer,
-    mimetype: 'image/jpeg',
-    originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
+    return {
+      buffer: jpegBuffer,
+      mimetype: 'image/jpeg',
+      originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
+    }
+  } catch {
+    const jpegBuffer = await sharp(file.buffer).jpeg({ quality: 92 }).toBuffer()
+
+    return {
+      buffer: jpegBuffer,
+      mimetype: 'image/jpeg',
+      originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
+    }
   }
 }
 

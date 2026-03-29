@@ -24,6 +24,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "heic-convert": "^2.1.0",
     "lucide-react": "^1.7.0",
     "multer": "^2.1.1",
     "react": "^19.2.4",
