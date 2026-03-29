@@ -1,8 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { spawnSync } from 'node:child_process'
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import sharp from 'sharp'
 
 import { config, hasAnthropicConfig } from '../config.js'
 import type {
@@ -878,40 +875,6 @@ export async function transcribeJournalPhotos(files: UploadedPhoto[]): Promise<s
   return result.transcript
 }
 
-function maybeConvertHeicForVision(file: UploadedPhoto) {
-  const isHeic = /heic|heif/i.test(file.mimetype) || /\.(heic|heif)$/i.test(file.originalname)
-  if (!isHeic) {
-    return file
-  }
-
-  const inputPath = join(tmpdir(), `journal-photo-${Date.now()}-${Math.random().toString(36).slice(2)}.heic`)
-  const outputPath = join(tmpdir(), `journal-photo-${Date.now()}-${Math.random().toString(36).slice(2)}.jpeg`)
-
-  try {
-    writeFileSync(inputPath, file.buffer)
-    const conversion = spawnSync('sips', ['-s', 'format', 'jpeg', inputPath, '--out', outputPath], {
-      encoding: 'utf8',
-    })
-
-    if (conversion.status !== 0) {
-      throw new Error(conversion.stderr || 'HEIC conversion failed')
-    }
-
-    return {
-      buffer: readFileSync(outputPath),
-      mimetype: 'image/jpeg',
-      originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
-    }
-  } finally {
-    try {
-      unlinkSync(inputPath)
-    } catch {}
-    try {
-      unlinkSync(outputPath)
-    } catch {}
-  }
-}
-
 async function cleanTranscription(text: string) {
   if (!anthropic || !text.trim()) return text.trim()
 
@@ -941,6 +904,21 @@ ${text}`
     .trim()
 }
 
+async function preparePhotoForVision(file: UploadedPhoto): Promise<UploadedPhoto> {
+  const isHeic = /heic|heif/i.test(file.mimetype) || /\.(heic|heif)$/i.test(file.originalname)
+  if (!isHeic) {
+    return file
+  }
+
+  const jpegBuffer = await sharp(file.buffer).jpeg({ quality: 92 }).toBuffer()
+
+  return {
+    buffer: jpegBuffer,
+    mimetype: 'image/jpeg',
+    originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
+  }
+}
+
 export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]): Promise<TranscriptionResult> {
   if (!files.length) {
     return { transcript: '', anySucceeded: false, failedCount: 0 }
@@ -959,7 +937,7 @@ export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]):
   const pageResults = await Promise.all(
     files.map(async (file, index) => {
       try {
-        const prepared = maybeConvertHeicForVision(file)
+        const prepared = await preparePhotoForVision(file)
         const response = await anthropic.messages.create({
           model: config.anthropicModel,
           max_tokens: 1200,
