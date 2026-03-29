@@ -14,7 +14,7 @@ That means one public URL can handle both the app UI and the API.
 
 - The server now serves the built frontend from `dist/` in production.
 - A basic Railway config exists in [`railway.json`](/Users/arifine/Documents/New%20project/railway.json).
-- The repo now requests Node 22 for hosting environments like Railway.
+- The repo now requests a Vite-compatible Node runtime for hosting environments like Railway.
 
 ## Railway steps
 
