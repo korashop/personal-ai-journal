@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 import { config, hasSupabaseConfig } from '../config.js'
-import { buildEntryTitle, buildSummary, deriveDisplaySummary, deriveDisplayTitle, simplifyPatternTitle } from './ai.js'
+import { deriveDisplaySummary, deriveDisplayTitle, simplifyPatternTitle } from './ai.js'
 import { demoConversations, demoEntries, demoHighlights, demoMemoryDoc } from './demo-data.js'
 import type {
   AnalysisPayload,
@@ -13,9 +13,29 @@ import type {
   JournalEntry,
   JournalBootstrapRecord,
   JournalView,
-  MemoryDocumentRecord,
   PatternSection,
 } from '../types.js'
+
+type SupabaseConversationRow = {
+  id: string
+  entry_id: string
+  role: ConversationMessageRecord['role']
+  content: string
+  created_at: string
+}
+
+type SupabaseEntryRow = {
+  id: string
+  user_id: string
+  created_at: string
+  raw_text: string
+  source: JournalEntry['source']
+  summary: string
+  tags: string[] | null
+  photo_url: string | string[] | null
+  has_open_threads: boolean | null
+  ai_response: unknown
+}
 
 type CreateEntryInput = {
   rawText: string
@@ -204,7 +224,8 @@ class DemoStore {
     return this.getEntryView(input.entryId)
   }
 
-  async deleteEntry(entryId: string, _userId?: string) {
+  async deleteEntry(entryId: string, userId?: string) {
+    void userId
     this.entries = this.entries.filter((entry) => entry.id !== entryId)
     this.conversations = this.conversations.filter((message) => message.entryId !== entryId)
   }
@@ -238,12 +259,14 @@ class DemoStore {
     return this.memory
   }
 
-  async updatePatterns(_userId: string, patterns: PatternSection[]) {
+  async updatePatterns(userId: string, patterns: PatternSection[]) {
+    void userId
     this.patterns = patterns
     return this.patterns
   }
 
-  async getEntryView(entryId: string, _userId?: string): Promise<JournalView> {
+  async getEntryView(entryId: string, userId?: string): Promise<JournalView> {
+    void userId
     const entry = this.entries.find((item) => item.id === entryId)
     if (!entry) {
       throw new Error('Entry not found')
@@ -291,7 +314,7 @@ class SupabaseStore {
     return signedUrls.filter((item): item is string => Boolean(item))
   }
 
-  private mapConversation(message: any): ConversationMessageRecord {
+  private mapConversation(message: SupabaseConversationRow): ConversationMessageRecord {
     return {
       id: message.id,
       entryId: message.entry_id,
@@ -301,7 +324,7 @@ class SupabaseStore {
     }
   }
 
-  private async mapEntry(entry: any, conversations: any[]): Promise<JournalView> {
+  private async mapEntry(entry: SupabaseEntryRow, conversations: SupabaseConversationRow[]): Promise<JournalView> {
     const analysis = parseLegacyAnalysis(entry.ai_response, entry.raw_text)
     const derivedSummary = deriveDisplaySummary(analysis?.summary?.trim() || entry.summary, entry.raw_text)
 
@@ -321,7 +344,7 @@ class SupabaseStore {
     }
   }
 
-  private mapEntryList(entry: any, conversationCount: number): EntryListRecord {
+  private mapEntryList(entry: SupabaseEntryRow, conversationCount: number): EntryListRecord {
     const analysis = parseLegacyAnalysis(entry.ai_response, entry.raw_text)
     const derivedSummary = deriveDisplaySummary(analysis?.summary?.trim() || entry.summary, entry.raw_text)
 

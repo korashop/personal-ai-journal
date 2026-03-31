@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, LoaderCircle, Send } from 'lucide-react'
+import { ChevronDown, ChevronUp, LoaderCircle, MessageSquareText, Send, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import type { FormEvent } from 'react'
 
@@ -67,6 +67,7 @@ type ThemeMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  state?: 'pending' | 'complete'
 }
 
 export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterThemeReply, patterns }: PatternsViewProps) {
@@ -75,6 +76,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   const [message, setMessage] = useState('')
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
   const [busy, setBusy] = useState(false)
+  const [refreshingThread, setRefreshingThread] = useState(false)
 
   useEffect(() => {
     try {
@@ -139,16 +141,24 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
     event.preventDefault()
     if (!selectedPattern || !message.trim()) return
     const question = message.trim()
+    const patternId = selectedPattern.id
+    const pendingAssistantId = `${patternId}-assistant-pending-${Date.now()}`
     try {
       setBusy(true)
       setThemeThreads((current) => ({
         ...current,
-        [selectedPattern.id]: [
-          ...(current[selectedPattern.id] ?? []),
+        [patternId]: [
+          ...(current[patternId] ?? []),
           {
-            id: `${selectedPattern.id}-user-${Date.now()}`,
+            id: `${patternId}-user-${Date.now()}`,
             role: 'user',
             content: question,
+          },
+          {
+            id: pendingAssistantId,
+            role: 'assistant',
+            content: 'Thinking through this theme...',
+            state: 'pending',
           },
         ],
       }))
@@ -156,16 +166,33 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
       const response = await createPatternReply(selectedPattern, question)
       setThemeThreads((current) => ({
         ...current,
-        [selectedPattern.id]: [
-          ...(current[selectedPattern.id] ?? []),
-          {
-            id: `${selectedPattern.id}-assistant-${Date.now()}`,
-            role: 'assistant',
-            content: response.answer,
-          },
-        ],
+        [patternId]: (current[patternId] ?? []).map((threadMessage) =>
+          threadMessage.id === pendingAssistantId
+            ? {
+                ...threadMessage,
+                content: response.answer,
+                state: 'complete',
+              }
+            : threadMessage,
+        ),
       }))
-      await onRefreshAfterThemeReply()
+      setRefreshingThread(true)
+      void onRefreshAfterThemeReply().finally(() => {
+        setRefreshingThread(false)
+      })
+    } catch {
+      setThemeThreads((current) => ({
+        ...current,
+        [patternId]: (current[patternId] ?? []).map((threadMessage) =>
+          threadMessage.id === pendingAssistantId
+            ? {
+                ...threadMessage,
+                content: 'That reply failed to come through. Try sending it again.',
+                state: 'complete',
+              }
+            : threadMessage,
+        ),
+      }))
     } finally {
       setBusy(false)
     }
@@ -267,7 +294,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
 
               {distinctQuestions.length ? (
                 <div className="pattern-column wide">
-                  <p className="subtle-label">Questions in play</p>
+                  <p className="subtle-label">Questions worth testing</p>
                   <ul className="pattern-list compact">
                     {distinctQuestions.map((question) => (
                       <li className="pattern-list-item compact" key={question}>
@@ -278,19 +305,6 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                 </div>
               ) : null}
             </div>
-
-            {selectedPattern.exploreOptions.length ? (
-              <div className="pattern-explore">
-                <p className="subtle-label">Try a line of inquiry</p>
-                <div className="explore-options stacked">
-                  {selectedPattern.exploreOptions.map((option) => (
-                    <button className="option-chip" key={option} onClick={() => setMessage(option)} type="button">
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
 
             <div className="pattern-entry-links">
               <p className="subtle-label">Where this shows up</p>
@@ -304,34 +318,75 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
               </div>
             </div>
 
-            <form className="reply-form pattern-chat" onSubmit={handleSubmit}>
-              <textarea
-                onChange={(event) => setMessage(event.target.value)}
-                placeholder="Ask about this theme, test an interpretation, or go deeper on one strand."
-                rows={4}
-                value={message}
-              />
-              <button className="primary-button" disabled={busy || !message.trim()} type="submit">
-                {busy ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}
-                {busy ? 'Thinking...' : 'Ask this theme'}
-              </button>
-            </form>
+            <section className="pattern-thread-shell">
+              <div className="conversation-header pattern-thread-header">
+                <div>
+                  <p className="subtle-label">Theme thread</p>
+                  <p className="pattern-thread-summary">Use this like a running conversation with the theme, not a one-off prompt.</p>
+                </div>
+                {refreshingThread ? (
+                  <span className="thread-sync-indicator">
+                    <LoaderCircle className="spin" size={14} />
+                    Refreshing patterns
+                  </span>
+                ) : null}
+              </div>
 
-            {selectedThread.length ? (
+              {selectedPattern.exploreOptions.length ? (
+                <div className="pattern-explore">
+                  <p className="subtle-label">Suggested next turns</p>
+                  <div className="explore-options stacked">
+                    {selectedPattern.exploreOptions.map((option) => (
+                      <button className="option-chip" key={option} onClick={() => setMessage(option)} type="button">
+                        <Sparkles size={14} />
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="conversation-list pattern-thread">
-                {selectedThread.map((threadMessage) => (
-                  <article className={`message ${threadMessage.role}`} key={threadMessage.id}>
-                    <div className="message-meta">
-                      <span>{threadMessage.role === 'user' ? 'You' : 'Theme'}</span>
+                {selectedThread.length ? (
+                  selectedThread.map((threadMessage) => (
+                    <article className={`message ${threadMessage.role} ${threadMessage.state === 'pending' ? 'pending' : ''}`} key={threadMessage.id}>
+                      <div className="message-meta">
+                        <span>{threadMessage.role === 'user' ? 'You' : 'Theme'}</span>
+                        {threadMessage.state === 'pending' ? <span>Writing...</span> : null}
+                      </div>
+                      <ReactMarkdown>{threadMessage.content}</ReactMarkdown>
+                    </article>
+                  ))
+                ) : (
+                  <div className="pattern-thread-empty">
+                    <MessageSquareText size={18} />
+                    <div>
+                      <strong>No messages yet.</strong>
+                      <p className="muted">Ask what is actually driving this theme, what changed recently, or what evidence would challenge your current read.</p>
                     </div>
-                    <ReactMarkdown>{threadMessage.content}</ReactMarkdown>
-                  </article>
-                ))}
+                  </div>
+                )}
+              </div>
+
+              <form className="reply-form pattern-chat" onSubmit={handleSubmit}>
+                <textarea
+                  onChange={(event) => setMessage(event.target.value)}
+                  placeholder="Ask about this theme, test an interpretation, or follow one strand further."
+                  rows={4}
+                  value={message}
+                />
+                <button className="primary-button" disabled={busy || !message.trim()} type="submit">
+                  {busy ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}
+                  {busy ? 'Thinking...' : 'Send'}
+                </button>
+              </form>
+
+              {selectedThread.length ? (
                 <p className="muted pattern-reply-note">
                   This thread is saved on this device and its ideas are folded back into the living memory and theme state.
                 </p>
-              </div>
-            ) : null}
+              ) : null}
+            </section>
 
           </div>
         ) : null}

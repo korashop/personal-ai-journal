@@ -36,6 +36,11 @@ function clip(text: string, maxLength = 220) {
   return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text
 }
 
+function clipForPrompt(text: string, maxLength: number) {
+  const cleaned = normalizeWhitespace(text)
+  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength).trim()}...` : cleaned
+}
+
 function slugify(text: string) {
   return text
     .toLowerCase()
@@ -182,6 +187,38 @@ function buildContextBullets(rawText: string) {
     .filter((line) => !looksLikeScaffolding(line))
 
   return cleaned.slice(0, 3).map((line) => clip(line, 120))
+}
+
+function memoryForPrompt(memoryDoc: MemoryDocumentRecord | null, maxLength = 2400) {
+  return memoryDoc?.content ? clipForPrompt(memoryDoc.content, maxLength) : 'No memory document yet.'
+}
+
+function recentEntriesForPrompt(entries: JournalEntry[], maxEntries = 4, maxLength = 180) {
+  return entries
+    .slice(0, maxEntries)
+    .map((entry) => `- ${clipForPrompt(entry.summary, maxLength)}`)
+    .join('\n') || 'None'
+}
+
+function highlightsForPrompt(highlights: HighlightRecord[], maxEntries = 2, maxLength = 150) {
+  return highlights
+    .slice(0, maxEntries)
+    .map((highlight) => `- ${clipForPrompt(highlight.content, maxLength)}`)
+    .join('\n') || 'None'
+}
+
+function patternEntriesForPrompt(entries: JournalEntry[], maxEntries = 8) {
+  return entries
+    .slice(0, maxEntries)
+    .map((entry) => `- ${entry.id} | ${clipForPrompt(entry.title, 70)} | ${clipForPrompt(entry.summary, 170)} | tags: ${entry.tags.join(', ')}`)
+    .join('\n')
+}
+
+function previousPatternsForPrompt(patterns: PatternSection[], maxEntries = 6) {
+  return patterns
+    .slice(0, maxEntries)
+    .map((pattern) => `- ${pattern.id} | ${clipForPrompt(pattern.title, 50)} | ${clipForPrompt(pattern.overview, 220)}`)
+    .join('\n') || 'None'
 }
 
 function buildFeedLabels(tags: string[], rawText: string, sections: Array<{ title: string }>) {
@@ -351,9 +388,8 @@ export async function generateAnalysis(
     return fallbackAnalysis(cleanedRaw, tags)
   }
 
-  const recentEntryLines = context.recentEntries.map((entry) => `- ${entry.summary}`).join('\n') || 'None'
-  const highlightLines =
-    context.relevantHighlights.map((highlight) => `- ${highlight.content}`).join('\n') || 'None'
+  const recentEntryLines = recentEntriesForPrompt(context.recentEntries)
+  const highlightLines = highlightsForPrompt(context.relevantHighlights)
 
   const prompt = `You are a direct, highly useful thinking partner with cumulative memory.
 Never congratulate the user for journaling.
@@ -375,6 +411,7 @@ Rules:
 - Section lengths can vary a lot.
 - Avoid template-sounding headings like always using the same 4 labels.
 - Optimize for usefulness and specificity.
+- Use complete thoughts. Do not end sections with ellipses or sentence fragments.
 - The title should sound like the real center of gravity of the entry, not the first sentence and not "Claude's analysis..."
 - The summary should help the user recognize what this entry is actually about later, in 1 or 2 sentences max.
 - Context bullets should be short, concrete, and source-oriented. Think "what was happening / what was being wrestled with", not interpretation.
@@ -383,7 +420,7 @@ Rules:
 - Feed labels should be short and useful, not broad buckets unless those are genuinely the right level.
 
 Memory doc:
-${context.memoryDoc?.content ?? 'No memory doc yet.'}
+${memoryForPrompt(context.memoryDoc)}
 
 Recent entries:
 ${recentEntryLines}
@@ -399,7 +436,7 @@ ${cleanedRaw}`
 
   const response = await anthropic.messages.create({
     model: config.anthropicModel,
-    max_tokens: 1200,
+    max_tokens: 1500,
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -466,7 +503,10 @@ export async function rewriteMemoryDoc(
 - What real move would create more information than more thinking?`
   }
 
-  const recentEntryLines = recentEntries.map((entry) => `- ${entry.createdAt}: ${entry.summary}`).join('\n')
+  const recentEntryLines = recentEntries
+    .slice(0, 8)
+    .map((entry) => `- ${entry.createdAt}: ${clipForPrompt(entry.summary, 170)}`)
+    .join('\n')
 
   const prompt = `Update this memory document so future analysis can use cumulative context.
 Keep it grounded in the user's actual writing. Avoid inflated abstractions.
@@ -476,7 +516,7 @@ Return markdown only using exactly these sections:
 ## Questions Worth Revisiting
 
 Current memory:
-${currentMemory?.content ?? 'No memory document yet.'}
+${memoryForPrompt(currentMemory, 2400)}
 
 Recent entries:
 ${recentEntryLines}`
@@ -595,6 +635,7 @@ function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'up
     if (!existing) {
       merged.push({
         ...pattern,
+        overview: pattern.overview.replace(/\.{3,}$/, '.').trim(),
         dimensions: dedupePatternLines(pattern.dimensions, pattern.overview).slice(0, 4),
         questions: dedupePatternLines(pattern.questions, `${pattern.overview}\n${pattern.dimensions.join('\n')}`).slice(0, 3),
         exploreOptions: dedupePatternLines(pattern.exploreOptions).slice(0, 3),
@@ -610,7 +651,7 @@ function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'up
     ).slice(0, 3)
     existing.exploreOptions = dedupePatternLines([...existing.exploreOptions, ...pattern.exploreOptions]).slice(0, 3)
     if (pattern.overview.length > existing.overview.length) {
-      existing.overview = pattern.overview
+      existing.overview = pattern.overview.replace(/\.{3,}$/, '.').trim()
       existing.title = simplifyPatternTitle(pattern.title)
     }
   }
@@ -703,9 +744,9 @@ Return JSON only:
 [
   {
     "title": "theme title",
-    "overview": "state of affairs: what this theme is, how it shows up, and your assessment",
-    "dimensions": ["important sub-thread", "important sub-thread"],
-    "questions": ["useful open question"],
+    "overview": "state of affairs: the mechanism, why it matters now, and what seems true at this moment",
+    "dimensions": ["distinct way the theme shows up", "distinct way the theme shows up"],
+    "questions": ["useful unresolved question"],
     "exploreOptions": ["one way to engage this theme"],
     "entryIds": ["entry id"]
   }
@@ -730,29 +771,27 @@ Rules:
 - If a broad domain like work appears, refine it into the actual thread inside the writing.
 - The overview, dimensions, and questions must do different jobs:
   - overview = the mechanism and why it matters now
-  - dimensions = distinct facets or tensions inside the pattern
-  - questions = genuinely open lines of inquiry
+  - dimensions = observable ways this pattern shows up, concrete tensions, or recurring situations
+  - questions = genuinely open lines of inquiry that are not already implied by the overview
 - Do not repeat the same sentence or paraphrase across overview, dimensions, and questions.
 - Do not just restate one recent entry in all three places.
+- If a line belongs in overview, do not repeat it in dimensions.
+- If a line is already an observation, do not rewrite it as a fake question.
+- Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
 
 Memory:
-${memoryDoc?.content ?? 'No memory document yet.'}
+${memoryForPrompt(memoryDoc, 1800)}
 
 Entries:
-${entries
-  .slice(0, 12)
-  .map((entry) => `- ${entry.id} | ${entry.title} | ${entry.summary} | tags: ${entry.tags.join(', ')}`)
-  .join('\n')}
+${patternEntriesForPrompt(recentEntries, 10)}
 
 Existing themes to preserve when still active:
-${previousPatterns.length
-  ? previousPatterns.map((pattern) => `- ${pattern.id} | ${pattern.title} | ${pattern.overview}`).join('\n')
-  : 'None'}
+${previousPatternsForPrompt(previousPatterns)}
 `
 
     const response = await anthropic.messages.create({
       model: config.anthropicModel,
-      max_tokens: 1200,
+      max_tokens: 900,
       messages: [{ role: 'user', content: prompt }],
     })
 
@@ -887,13 +926,17 @@ Questions:
 ${pattern.questions.map((item) => `- ${item}`).join('\n')}
 
 Memory:
-${memoryDoc?.content ?? 'No memory document yet.'}
+${memoryForPrompt(memoryDoc, 1500)}
 
 Related entries:
-${relatedEntries.map((entry) => `- ${entry.title}: ${entry.summary}`).join('\n')}
+${recentEntriesForPrompt(
+  relatedEntries.map((entry) => ({ ...entry, summary: `${entry.title}: ${entry.summary}` })),
+  5,
+  220,
+)}
 
 User message:
-${userMessage}`
+${clipForPrompt(userMessage, 600)}`
 
   const response = await anthropic.messages.create({
     model: config.anthropicModel,
@@ -930,7 +973,7 @@ Rules:
 - If the exchange adds nothing durable, keep changes minimal.
 
 Current memory document:
-${currentMemory?.content ?? 'No memory document yet.'}
+${memoryForPrompt(currentMemory, 1800)}
 
 Theme being explored:
 ${pattern.title}
@@ -939,10 +982,10 @@ Theme overview:
 ${pattern.overview}
 
 User message:
-${userMessage}
+${clipForPrompt(userMessage, 500)}
 
 Assistant response:
-${answer}`
+${clipForPrompt(answer, 900)}`
 
   const response = await anthropic.messages.create({
     model: config.anthropicModel,

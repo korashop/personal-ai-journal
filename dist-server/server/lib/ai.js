@@ -1,12 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { spawnSync } from 'node:child_process';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import convertHeic from 'heic-convert';
+import sharp from 'sharp';
 import { config, hasAnthropicConfig } from '../config.js';
 const anthropic = hasAnthropicConfig ? new Anthropic({ apiKey: config.anthropicApiKey }) : null;
 function clip(text, maxLength = 220) {
     return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+}
+function clipForPrompt(text, maxLength) {
+    const cleaned = normalizeWhitespace(text);
+    return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength).trim()}...` : cleaned;
 }
 function slugify(text) {
     return text
@@ -35,6 +37,16 @@ export function sanitizeJournalText(text) {
         .map((line) => line.replace(/^\d[\d./-]*\.?\s*$/i, ''))
         .map((line) => line.replace(/^[-–:.,\s]+$/, ''))
         .filter(Boolean)
+        .join('\n');
+}
+export function buildAnalysisInput(text) {
+    return sanitizeJournalText(text)
+        .split('\n')
+        .map((line) => line.replace(/^page\s+\d+\s*$/i, ''))
+        .map((line) => line.replace(/^image\s+\d+\s*[-–]\s*.+$/i, ''))
+        .map((line) => line.replace(/\[unclear\]/gi, ''))
+        .map((line) => line.replace(/\s{2,}/g, ' ').trim())
+        .filter((line) => line && !/^\[ocr unavailable.*\]$/i.test(line))
         .join('\n');
 }
 function looksLikeScaffolding(text) {
@@ -123,17 +135,44 @@ export function inferTags(rawText) {
     return tags.size ? [...tags] : ['General'];
 }
 export function buildSummary(rawText) {
-    const cleaned = stripBoilerplate(rawText);
+    const cleaned = stripBoilerplate(buildAnalysisInput(rawText) || rawText);
     const firstTwoSentences = cleaned.match(/(.+?[.!?](?:\s+.+?[.!?])?)/)?.[1]?.trim() ?? cleaned;
     return clip(firstTwoSentences, 180);
 }
 function buildContextBullets(rawText) {
-    const cleaned = sanitizeJournalText(rawText)
+    const cleaned = buildAnalysisInput(rawText)
         .split('\n')
         .map((line) => normalizeWhitespace(line))
         .filter(Boolean)
         .filter((line) => !looksLikeScaffolding(line));
     return cleaned.slice(0, 3).map((line) => clip(line, 120));
+}
+function memoryForPrompt(memoryDoc, maxLength = 2400) {
+    return memoryDoc?.content ? clipForPrompt(memoryDoc.content, maxLength) : 'No memory document yet.';
+}
+function recentEntriesForPrompt(entries, maxEntries = 4, maxLength = 180) {
+    return entries
+        .slice(0, maxEntries)
+        .map((entry) => `- ${clipForPrompt(entry.summary, maxLength)}`)
+        .join('\n') || 'None';
+}
+function highlightsForPrompt(highlights, maxEntries = 2, maxLength = 150) {
+    return highlights
+        .slice(0, maxEntries)
+        .map((highlight) => `- ${clipForPrompt(highlight.content, maxLength)}`)
+        .join('\n') || 'None';
+}
+function patternEntriesForPrompt(entries, maxEntries = 8) {
+    return entries
+        .slice(0, maxEntries)
+        .map((entry) => `- ${entry.id} | ${clipForPrompt(entry.title, 70)} | ${clipForPrompt(entry.summary, 170)} | tags: ${entry.tags.join(', ')}`)
+        .join('\n');
+}
+function previousPatternsForPrompt(patterns, maxEntries = 6) {
+    return patterns
+        .slice(0, maxEntries)
+        .map((pattern) => `- ${pattern.id} | ${clipForPrompt(pattern.title, 50)} | ${clipForPrompt(pattern.overview, 220)}`)
+        .join('\n') || 'None';
 }
 function buildFeedLabels(tags, rawText, sections) {
     const labels = [
@@ -147,7 +186,7 @@ function buildFeedLabels(tags, rawText, sections) {
     return [...new Set(labels)].slice(0, 3);
 }
 export function buildEntryTitle(rawText, tags) {
-    const clean = normalizeWhitespace(rawText);
+    const clean = normalizeWhitespace(buildAnalysisInput(rawText) || rawText);
     const base = stripBoilerplate(clean) || clean;
     if (!base) {
         return tags[0] ? `${tags[0]} thread` : 'Untitled entry';
@@ -175,7 +214,7 @@ export function buildEntryTitle(rawText, tags) {
     return clip(firstSentence, 56);
 }
 function fallbackAnalysis(rawText, tags) {
-    const cleanedRaw = sanitizeJournalText(rawText);
+    const cleanedRaw = buildAnalysisInput(rawText);
     const summary = buildSummary(cleanedRaw || rawText);
     const hasOnlyScaffolding = !cleanedRaw.trim();
     const sections = [
@@ -268,8 +307,8 @@ export async function generateAnalysis(rawText, tags, context) {
     if (!anthropic) {
         return fallbackAnalysis(cleanedRaw, tags);
     }
-    const recentEntryLines = context.recentEntries.map((entry) => `- ${entry.summary}`).join('\n') || 'None';
-    const highlightLines = context.relevantHighlights.map((highlight) => `- ${highlight.content}`).join('\n') || 'None';
+    const recentEntryLines = recentEntriesForPrompt(context.recentEntries);
+    const highlightLines = highlightsForPrompt(context.relevantHighlights);
     const prompt = `You are a direct, highly useful thinking partner with cumulative memory.
 Never congratulate the user for journaling.
 Do not force a fixed structure if the entry does not need it.
@@ -290,6 +329,7 @@ Rules:
 - Section lengths can vary a lot.
 - Avoid template-sounding headings like always using the same 4 labels.
 - Optimize for usefulness and specificity.
+- Use complete thoughts. Do not end sections with ellipses or sentence fragments.
 - The title should sound like the real center of gravity of the entry, not the first sentence and not "Claude's analysis..."
 - The summary should help the user recognize what this entry is actually about later, in 1 or 2 sentences max.
 - Context bullets should be short, concrete, and source-oriented. Think "what was happening / what was being wrestled with", not interpretation.
@@ -298,7 +338,7 @@ Rules:
 - Feed labels should be short and useful, not broad buckets unless those are genuinely the right level.
 
 Memory doc:
-${context.memoryDoc?.content ?? 'No memory doc yet.'}
+${memoryForPrompt(context.memoryDoc)}
 
 Recent entries:
 ${recentEntryLines}
@@ -313,7 +353,7 @@ New entry:
 ${cleanedRaw}`;
     const response = await anthropic.messages.create({
         model: config.anthropicModel,
-        max_tokens: 1200,
+        max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content
@@ -362,7 +402,10 @@ export async function rewriteMemoryDoc(currentMemory, recentEntries) {
 ## Questions Worth Revisiting
 - What real move would create more information than more thinking?`;
     }
-    const recentEntryLines = recentEntries.map((entry) => `- ${entry.createdAt}: ${entry.summary}`).join('\n');
+    const recentEntryLines = recentEntries
+        .slice(0, 8)
+        .map((entry) => `- ${entry.createdAt}: ${clipForPrompt(entry.summary, 170)}`)
+        .join('\n');
     const prompt = `Update this memory document so future analysis can use cumulative context.
 Keep it grounded in the user's actual writing. Avoid inflated abstractions.
 Return markdown only using exactly these sections:
@@ -371,7 +414,7 @@ Return markdown only using exactly these sections:
 ## Questions Worth Revisiting
 
 Current memory:
-${currentMemory?.content ?? 'No memory document yet.'}
+${memoryForPrompt(currentMemory, 2400)}
 
 Recent entries:
 ${recentEntryLines}`;
@@ -434,6 +477,63 @@ function scorePatternMatch(left, right) {
     const sharedEntryIds = right.entryIds.filter((entryId) => left.entryIds.includes(entryId)).length;
     const sharedDimension = right.dimensions.some((dimension) => left.dimensions.some((existing) => normalizePatternTitle(existing) === normalizePatternTitle(dimension)));
     return (titleOverlap ? 3 : 0) + sharedEntryIds * 2 + (sharedDimension ? 1 : 0);
+}
+function dedupePatternLines(lines, seedText = '') {
+    const kept = [];
+    const normalize = (text) => text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const overlap = (left, right) => {
+        const leftTokens = new Set(normalize(left).split(' ').filter((token) => token.length > 3));
+        const rightTokens = new Set(normalize(right).split(' ').filter((token) => token.length > 3));
+        if (!leftTokens.size || !rightTokens.size)
+            return 0;
+        let shared = 0;
+        for (const token of leftTokens) {
+            if (rightTokens.has(token))
+                shared += 1;
+        }
+        return shared / Math.max(leftTokens.size, rightTokens.size);
+    };
+    for (const line of lines) {
+        if (seedText && overlap(line, seedText) > 0.5)
+            continue;
+        if (kept.some((existing) => overlap(existing, line) > 0.58))
+            continue;
+        kept.push(line);
+    }
+    return kept;
+}
+function dedupeAndRefinePatterns(patterns) {
+    const merged = [];
+    for (const pattern of patterns) {
+        const existing = merged.find((candidate) => {
+            const titleScore = normalizePatternTitle(candidate.title) === normalizePatternTitle(pattern.title);
+            const sharedEntries = pattern.entryIds.filter((entryId) => candidate.entryIds.includes(entryId)).length;
+            return titleScore || sharedEntries >= Math.min(2, pattern.entryIds.length);
+        });
+        if (!existing) {
+            merged.push({
+                ...pattern,
+                overview: pattern.overview.replace(/\.{3,}$/, '.').trim(),
+                dimensions: dedupePatternLines(pattern.dimensions, pattern.overview).slice(0, 4),
+                questions: dedupePatternLines(pattern.questions, `${pattern.overview}\n${pattern.dimensions.join('\n')}`).slice(0, 3),
+                exploreOptions: dedupePatternLines(pattern.exploreOptions).slice(0, 3),
+            });
+            continue;
+        }
+        existing.entryIds = [...new Set([...existing.entryIds, ...pattern.entryIds])];
+        existing.dimensions = dedupePatternLines([...existing.dimensions, ...pattern.dimensions], existing.overview).slice(0, 4);
+        existing.questions = dedupePatternLines([...existing.questions, ...pattern.questions], `${existing.overview}\n${existing.dimensions.join('\n')}`).slice(0, 3);
+        existing.exploreOptions = dedupePatternLines([...existing.exploreOptions, ...pattern.exploreOptions]).slice(0, 3);
+        if (pattern.overview.length > existing.overview.length) {
+            existing.overview = pattern.overview.replace(/\.{3,}$/, '.').trim();
+            existing.title = simplifyPatternTitle(pattern.title);
+        }
+    }
+    return merged;
 }
 function reconcilePatterns(previousPatterns, nextPatterns) {
     const timestamp = new Date().toISOString();
@@ -504,45 +604,53 @@ Return JSON only:
 [
   {
     "title": "theme title",
-    "overview": "state of affairs: what this theme is, how it shows up, and your assessment",
-    "dimensions": ["important sub-thread", "important sub-thread"],
-    "questions": ["useful open question"],
+    "overview": "state of affairs: the mechanism, why it matters now, and what seems true at this moment",
+    "dimensions": ["distinct way the theme shows up", "distinct way the theme shows up"],
+    "questions": ["useful unresolved question"],
     "exploreOptions": ["one way to engage this theme"],
     "entryIds": ["entry id"]
   }
 ]
 
 Rules:
-- 1 to 4 themes max.
+- Return the real set of important themes. Do not target a number for its own sake.
 - Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
 - Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
 - Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
 - Preserve continuity in major themes. If an existing theme is still active, prefer refining it rather than inventing a brand new title.
-- Do not create a theme unless it seems to persist across multiple entries or materially shapes the user's thinking.
-- It is better to return 2 honest themes than 5 weak ones.
+- Create a theme when it seems genuinely important, durable, or central to the user's thinking, even if it is newly emerging.
+- Do not inflate the list with weak themes just to have more themes.
+- Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
+- If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
+- Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
+- Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
 - Themes can vary in depth.
 - Use only entry IDs that are provided below.
 - Do not just repeat entry text. Synthesize.
 - Prefer psychological or decision-making patterns over broad topic tags.
 - If a broad domain like work appears, refine it into the actual thread inside the writing.
+- The overview, dimensions, and questions must do different jobs:
+  - overview = the mechanism and why it matters now
+  - dimensions = observable ways this pattern shows up, concrete tensions, or recurring situations
+  - questions = genuinely open lines of inquiry that are not already implied by the overview
+- Do not repeat the same sentence or paraphrase across overview, dimensions, and questions.
+- Do not just restate one recent entry in all three places.
+- If a line belongs in overview, do not repeat it in dimensions.
+- If a line is already an observation, do not rewrite it as a fake question.
+- Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
 
 Memory:
-${memoryDoc?.content ?? 'No memory document yet.'}
+${memoryForPrompt(memoryDoc, 1800)}
 
 Entries:
-${entries
-            .slice(0, 12)
-            .map((entry) => `- ${entry.id} | ${entry.title} | ${entry.summary} | tags: ${entry.tags.join(', ')}`)
-            .join('\n')}
+${patternEntriesForPrompt(recentEntries, 10)}
 
 Existing themes to preserve when still active:
-${previousPatterns.length
-            ? previousPatterns.map((pattern) => `- ${pattern.id} | ${pattern.title} | ${pattern.overview}`).join('\n')
-            : 'None'}
+${previousPatternsForPrompt(previousPatterns)}
 `;
         const response = await anthropic.messages.create({
             model: config.anthropicModel,
-            max_tokens: 1200,
+            max_tokens: 900,
             messages: [{ role: 'user', content: prompt }],
         });
         const text = response.content
@@ -565,7 +673,7 @@ ${previousPatterns.length
                 entryIds: (item.entryIds ?? []).filter(Boolean),
             }));
             if (patterns.length) {
-                const paddedPatterns = [...patterns];
+                const paddedPatterns = dedupeAndRefinePatterns(patterns);
                 for (const heuristicPattern of heuristicPatterns) {
                     const overlapsExisting = paddedPatterns.some((pattern) => normalizePatternTitle(pattern.title) === normalizePatternTitle(heuristicPattern.title) ||
                         heuristicPattern.entryIds.some((entryId) => pattern.entryIds.includes(entryId)));
@@ -573,7 +681,7 @@ ${previousPatterns.length
                         paddedPatterns.push(heuristicPattern);
                     }
                 }
-                return reconcilePatterns(previousPatterns, paddedPatterns);
+                return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns));
             }
         }
         catch {
@@ -642,13 +750,13 @@ Questions:
 ${pattern.questions.map((item) => `- ${item}`).join('\n')}
 
 Memory:
-${memoryDoc?.content ?? 'No memory document yet.'}
+${memoryForPrompt(memoryDoc, 1500)}
 
 Related entries:
-${relatedEntries.map((entry) => `- ${entry.title}: ${entry.summary}`).join('\n')}
+${recentEntriesForPrompt(relatedEntries.map((entry) => ({ ...entry, summary: `${entry.title}: ${entry.summary}` })), 5, 220)}
 
 User message:
-${userMessage}`;
+${clipForPrompt(userMessage, 600)}`;
     const response = await anthropic.messages.create({
         model: config.anthropicModel,
         max_tokens: 600,
@@ -676,7 +784,7 @@ Rules:
 - If the exchange adds nothing durable, keep changes minimal.
 
 Current memory document:
-${currentMemory?.content ?? 'No memory document yet.'}
+${memoryForPrompt(currentMemory, 1800)}
 
 Theme being explored:
 ${pattern.title}
@@ -685,10 +793,10 @@ Theme overview:
 ${pattern.overview}
 
 User message:
-${userMessage}
+${clipForPrompt(userMessage, 500)}
 
 Assistant response:
-${answer}`;
+${clipForPrompt(answer, 900)}`;
     const response = await anthropic.messages.create({
         model: config.anthropicModel,
         max_tokens: 900,
@@ -704,38 +812,6 @@ export async function transcribeJournalPhotos(files) {
     const result = await transcribeJournalPhotosWithStatus(files);
     return result.transcript;
 }
-function maybeConvertHeicForVision(file) {
-    const isHeic = /heic|heif/i.test(file.mimetype) || /\.(heic|heif)$/i.test(file.originalname);
-    if (!isHeic) {
-        return file;
-    }
-    const inputPath = join(tmpdir(), `journal-photo-${Date.now()}-${Math.random().toString(36).slice(2)}.heic`);
-    const outputPath = join(tmpdir(), `journal-photo-${Date.now()}-${Math.random().toString(36).slice(2)}.jpeg`);
-    try {
-        writeFileSync(inputPath, file.buffer);
-        const conversion = spawnSync('sips', ['-s', 'format', 'jpeg', inputPath, '--out', outputPath], {
-            encoding: 'utf8',
-        });
-        if (conversion.status !== 0) {
-            throw new Error(conversion.stderr || 'HEIC conversion failed');
-        }
-        return {
-            buffer: readFileSync(outputPath),
-            mimetype: 'image/jpeg',
-            originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
-        };
-    }
-    finally {
-        try {
-            unlinkSync(inputPath);
-        }
-        catch { }
-        try {
-            unlinkSync(outputPath);
-        }
-        catch { }
-    }
-}
 async function cleanTranscription(text) {
     if (!anthropic || !text.trim())
         return text.trim();
@@ -744,6 +820,7 @@ async function cleanTranscription(text) {
 Rules:
 - Return only the cleaned transcription.
 - Remove generic headings like "Transcribed Journal Page".
+- Do not add file names or page labels to the transcription.
 - Preserve meaning, tone, and paragraph breaks.
 - Fix obvious OCR mistakes only when highly confident.
 - Keep [unclear] markers when a word is genuinely uncertain.
@@ -762,6 +839,32 @@ ${text}`;
         .join('\n')
         .trim();
 }
+async function preparePhotoForVision(file) {
+    const isHeic = /heic|heif/i.test(file.mimetype) || /\.(heic|heif)$/i.test(file.originalname);
+    if (!isHeic) {
+        return file;
+    }
+    try {
+        const jpegBuffer = Buffer.from(await convertHeic({
+            buffer: file.buffer,
+            format: 'JPEG',
+            quality: 0.92,
+        }));
+        return {
+            buffer: jpegBuffer,
+            mimetype: 'image/jpeg',
+            originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
+        };
+    }
+    catch {
+        const jpegBuffer = await sharp(file.buffer).jpeg({ quality: 92 }).toBuffer();
+        return {
+            buffer: jpegBuffer,
+            mimetype: 'image/jpeg',
+            originalname: file.originalname.replace(/\.(heic|heif)$/i, '.jpeg'),
+        };
+    }
+}
 export async function transcribeJournalPhotosWithStatus(files) {
     if (!files.length) {
         return { transcript: '', anySucceeded: false, failedCount: 0 };
@@ -777,7 +880,7 @@ export async function transcribeJournalPhotosWithStatus(files) {
     }
     const pageResults = await Promise.all(files.map(async (file, index) => {
         try {
-            const prepared = maybeConvertHeicForVision(file);
+            const prepared = await preparePhotoForVision(file);
             const response = await anthropic.messages.create({
                 model: config.anthropicModel,
                 max_tokens: 1200,
@@ -815,13 +918,13 @@ export async function transcribeJournalPhotosWithStatus(files) {
             const cleaned = await cleanTranscription(text);
             return {
                 success: true,
-                section: `Image ${index + 1} - ${file.originalname}\n${cleaned || text}`,
+                section: `Page ${index + 1}\n${cleaned || text}`,
             };
         }
         catch {
             return {
                 success: false,
-                section: `Image ${index + 1} - ${file.originalname}\n[OCR unavailable for this image]`,
+                section: `Page ${index + 1}\n[OCR unavailable for this image]`,
             };
         }
     }));

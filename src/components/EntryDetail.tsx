@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronUp, LoaderCircle, Pencil, RotateCcw, Send, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { format } from 'date-fns'
@@ -21,14 +21,7 @@ export function EntryDetail({ busy, entry, onBack, onDelete, onReanalyze, onRepl
   const [showRawEntry, setShowRawEntry] = useState(false)
   const [showDeeperOptions, setShowDeeperOptions] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-
-  useEffect(() => {
-    setShowRawEntry(false)
-    setShowDeeperOptions(false)
-    setEditing(false)
-    setDraft(entry?.rawText ?? '')
-  }, [entry?.id])
+  const [draft, setDraft] = useState(() => entry?.rawText ?? '')
 
   const conversation = useMemo(() => {
     if (!entry) return []
@@ -43,7 +36,7 @@ export function EntryDetail({ busy, entry, onBack, onDelete, onReanalyze, onRepl
     [entry?.rawText],
   )
 
-  const visibleSections = useMemo(() => {
+  const visibleSections = (() => {
     if (!entry?.analysis?.sections) return []
     const summaryBaseline = entry.analysis.summary.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 160)
 
@@ -65,7 +58,7 @@ export function EntryDetail({ busy, entry, onBack, onDelete, onReanalyze, onRepl
 
       return currentPrefix !== previousPrefix && !currentPrefix.startsWith(previousPrefix) && !previousPrefix.startsWith(currentPrefix)
     })
-  }, [entry?.analysis?.sections, entry?.analysis?.summary])
+  })()
 
   if (!entry) {
     return (

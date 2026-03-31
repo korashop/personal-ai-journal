@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { buildEntryTitle, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
+import { buildAnalysisInput, buildEntryTitle, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
 import { getStore, isLiveStore } from './lib/store.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -54,6 +54,28 @@ async function refreshDerivedState(userId) {
     const nextBootstrap = await store.getBootstrap(userId);
     const patterns = await buildPatterns(nextBootstrap.memoryDoc, nextBootstrap.patternEntries, nextBootstrap.patterns);
     await store.updatePatterns(userId, patterns);
+}
+function triggerDerivedRefresh(userId) {
+    void refreshDerivedState(userId).catch((error) => {
+        console.error('Derived refresh failed', error);
+    });
+}
+function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
+    void (async () => {
+        const { store } = getStore();
+        const bootstrap = await store.getBootstrap(userId);
+        const nextMemory = await integratePatternReplyIntoMemory(bootstrap.memoryDoc, {
+            ...pattern,
+            status: pattern.status ?? 'active',
+            entryCount: pattern.entryCount ?? pattern.entryIds.length,
+            updatedAt: pattern.updatedAt ?? new Date().toISOString(),
+        }, userMessage, answer);
+        const memoryDoc = await store.updateMemory(userId, nextMemory);
+        const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, bootstrap.patterns);
+        await store.updatePatterns(userId, patterns);
+    })().catch((error) => {
+        console.error('Pattern refresh after reply failed', error);
+    });
 }
 app.get('/api/health', (_request, response) => {
     response.json({ ok: true });
@@ -115,8 +137,9 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
             }
             rawText = rawText ? `${rawText}\n\n---\n\n${transcription.transcript}` : transcription.transcript;
         }
-        const tags = inferTags(rawText);
-        const analysis = await generateAnalysis(rawText, tags, {
+        const analysisInput = buildAnalysisInput(rawText) || rawText;
+        const tags = inferTags(analysisInput);
+        const analysis = await generateAnalysis(analysisInput, tags, {
             memoryDoc: bootstrap.memoryDoc,
             recentEntries: bootstrap.patternEntries.slice(0, 5),
             relevantHighlights: bootstrap.highlights.slice(0, 3),
@@ -124,15 +147,15 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
         const entry = await store.createEntry({
             rawText,
             source: files.length ? 'photo' : parsed.source,
-            title: analysis.title || buildEntryTitle(rawText, tags),
+            title: analysis.title || buildEntryTitle(analysisInput, tags),
             tags,
-            summary: analysis.summary || buildSummary(rawText),
+            summary: analysis.summary || buildSummary(analysisInput),
             photoUrls,
             userId,
             analysis,
         });
-        await refreshDerivedState(userId);
         response.status(201).json(entry);
+        triggerDerivedRefresh(userId);
     }
     catch (error) {
         next(error);
@@ -176,8 +199,8 @@ app.post('/api/conversations', async (request, response, next) => {
             relevantHighlights: bootstrap.highlights.slice(0, 3),
         });
         const updatedEntry = await store.appendConversation(parsed.entryId, userId, parsed.content, assistantContent);
-        await refreshDerivedState(userId);
         response.json(updatedEntry);
+        triggerDerivedRefresh(userId);
     }
     catch (error) {
         next(error);
@@ -196,8 +219,9 @@ app.patch('/api/entries/:entryId', async (request, response, next) => {
             response.status(404).json({ error: 'Entry not found' });
             return;
         }
-        const tags = inferTags(parsed.rawText);
-        const analysis = await generateAnalysis(parsed.rawText, tags, {
+        const analysisInput = buildAnalysisInput(parsed.rawText) || parsed.rawText;
+        const tags = inferTags(analysisInput);
+        const analysis = await generateAnalysis(analysisInput, tags, {
             memoryDoc: bootstrap.memoryDoc,
             recentEntries: bootstrap.patternEntries.filter((item) => item.id !== entry.id).slice(0, 5),
             relevantHighlights: bootstrap.highlights.slice(0, 3),
@@ -206,13 +230,13 @@ app.patch('/api/entries/:entryId', async (request, response, next) => {
             entryId: entry.id,
             userId,
             rawText: parsed.rawText,
-            title: analysis.title || buildEntryTitle(parsed.rawText, tags),
+            title: analysis.title || buildEntryTitle(analysisInput, tags),
             tags,
-            summary: analysis.summary || buildSummary(parsed.rawText),
+            summary: analysis.summary || buildSummary(analysisInput),
             analysis,
         });
-        await refreshDerivedState(userId);
         response.json(updatedEntry);
+        triggerDerivedRefresh(userId);
     }
     catch (error) {
         next(error);
@@ -230,7 +254,9 @@ app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
             response.status(404).json({ error: 'Entry not found' });
             return;
         }
-        const analysis = await generateAnalysis(entry.rawText, entry.tags, {
+        const analysisInput = buildAnalysisInput(entry.rawText) || entry.rawText;
+        const tags = inferTags(analysisInput);
+        const analysis = await generateAnalysis(analysisInput, tags, {
             memoryDoc: bootstrap.memoryDoc,
             recentEntries: bootstrap.patternEntries.filter((item) => item.id !== entry.id).slice(0, 5),
             relevantHighlights: bootstrap.highlights.slice(0, 3),
@@ -239,13 +265,13 @@ app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
             entryId: entry.id,
             userId,
             rawText: entry.rawText,
-            title: analysis.title || buildEntryTitle(entry.rawText, entry.tags),
-            tags: entry.tags,
-            summary: analysis.summary || buildSummary(entry.rawText),
+            title: analysis.title || buildEntryTitle(analysisInput, tags),
+            tags,
+            summary: analysis.summary || buildSummary(analysisInput),
             analysis,
         });
-        await refreshDerivedState(userId);
         response.json(updatedEntry);
+        triggerDerivedRefresh(userId);
     }
     catch (error) {
         next(error);
@@ -267,8 +293,8 @@ app.delete('/api/entries/:entryId', async (request, response, next) => {
         const userId = typeof request.query.userId === 'string' ? request.query.userId : config.demoUserId;
         const { store } = getStore();
         await store.deleteEntry(request.params.entryId, userId);
-        await refreshDerivedState(userId);
         response.status(204).send();
+        triggerDerivedRefresh(userId);
     }
     catch (error) {
         next(error);
@@ -283,29 +309,26 @@ app.post('/api/patterns/reply', async (request, response, next) => {
         const relatedEntries = bootstrap.entries
             .filter((entry) => parsed.pattern.entryIds.includes(entry.id));
         const relatedEntryDetails = await Promise.all(relatedEntries.map((entry) => store.getEntryView(entry.id, userId)));
-        const relatedPatternEntries = relatedEntryDetails.map(({ conversation, ...item }) => item);
+        const relatedPatternEntries = relatedEntryDetails.map((entryView) => {
+            const { conversation, ...item } = entryView;
+            void conversation;
+            return item;
+        });
         const answer = await generatePatternReply({
             ...parsed.pattern,
             status: parsed.pattern.status ?? 'active',
             entryCount: parsed.pattern.entryCount ?? parsed.pattern.entryIds.length,
             updatedAt: parsed.pattern.updatedAt ?? new Date().toISOString(),
         }, relatedPatternEntries, bootstrap.memoryDoc, parsed.content);
-        const nextMemory = await integratePatternReplyIntoMemory(bootstrap.memoryDoc, {
-            ...parsed.pattern,
-            status: parsed.pattern.status ?? 'active',
-            entryCount: parsed.pattern.entryCount ?? parsed.pattern.entryIds.length,
-            updatedAt: parsed.pattern.updatedAt ?? new Date().toISOString(),
-        }, parsed.content, answer);
-        const memoryDoc = await store.updateMemory(userId, nextMemory);
-        const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, bootstrap.patterns);
-        await store.updatePatterns(userId, patterns);
-        response.json({ answer, memoryDoc, patterns });
+        response.json({ answer });
+        triggerPatternRefreshAfterReply(userId, parsed.pattern, parsed.content, answer);
     }
     catch (error) {
         next(error);
     }
 });
-app.use((error, _request, response, _next) => {
+app.use((error, _request, response, next) => {
+    void next;
     const message = error instanceof Error ? error.message : 'Something went wrong';
     response.status(500).json({ error: message });
 });

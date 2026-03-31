@@ -83,6 +83,31 @@ function triggerDerivedRefresh(userId: string) {
   })
 }
 
+function triggerPatternRefreshAfterReply(userId: string, pattern: z.infer<typeof patternReplySchema>['pattern'], userMessage: string, answer: string) {
+  void (async () => {
+    const { store } = getStore()
+    const bootstrap = await store.getBootstrap(userId)
+
+    const nextMemory = await integratePatternReplyIntoMemory(
+      bootstrap.memoryDoc,
+      {
+        ...pattern,
+        status: pattern.status ?? 'active',
+        entryCount: pattern.entryCount ?? pattern.entryIds.length,
+        updatedAt: pattern.updatedAt ?? new Date().toISOString(),
+      },
+      userMessage,
+      answer,
+    )
+
+    const memoryDoc = await store.updateMemory(userId, nextMemory)
+    const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, bootstrap.patterns)
+    await store.updatePatterns(userId, patterns)
+  })().catch((error) => {
+    console.error('Pattern refresh after reply failed', error)
+  })
+}
+
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true })
 })
@@ -351,7 +376,11 @@ app.post('/api/patterns/reply', async (request, response, next) => {
       .filter((entry) => parsed.pattern.entryIds.includes(entry.id))
 
     const relatedEntryDetails = await Promise.all(relatedEntries.map((entry) => store.getEntryView(entry.id, userId)))
-    const relatedPatternEntries = relatedEntryDetails.map(({ conversation, ...item }) => item)
+    const relatedPatternEntries = relatedEntryDetails.map((entryView) => {
+      const { conversation, ...item } = entryView
+      void conversation
+      return item
+    })
 
     const answer = await generatePatternReply(
       {
@@ -364,29 +393,15 @@ app.post('/api/patterns/reply', async (request, response, next) => {
       bootstrap.memoryDoc,
       parsed.content,
     )
-    const nextMemory = await integratePatternReplyIntoMemory(
-      bootstrap.memoryDoc,
-      {
-        ...parsed.pattern,
-        status: parsed.pattern.status ?? 'active',
-        entryCount: parsed.pattern.entryCount ?? parsed.pattern.entryIds.length,
-        updatedAt: parsed.pattern.updatedAt ?? new Date().toISOString(),
-      },
-      parsed.content,
-      answer,
-    )
-
-    const memoryDoc = await store.updateMemory(userId, nextMemory)
-    const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, bootstrap.patterns)
-    await store.updatePatterns(userId, patterns)
-
-    response.json({ answer, memoryDoc, patterns })
+    response.json({ answer })
+    triggerPatternRefreshAfterReply(userId, parsed.pattern, parsed.content, answer)
   } catch (error) {
     next(error)
   }
 })
 
-app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
+  void next
   const message = error instanceof Error ? error.message : 'Something went wrong'
   response.status(500).json({ error: message })
 })

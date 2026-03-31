@@ -66,8 +66,8 @@ export type PatternSection = {
 };
 export type PatternReplyPayload = {
     answer: string;
-    memoryDoc: MemoryDocument | null;
-    patterns: PatternSection[];
+    memoryDoc?: MemoryDocument | null;
+    patterns?: PatternSection[];
 };
 export type ResurfacingCard = {
     title: string;

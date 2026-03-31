@@ -15,6 +15,7 @@ type TranscriptionResult = {
     failedCount: number;
 };
 export declare function sanitizeJournalText(text: string): string;
+export declare function buildAnalysisInput(text: string): string;
 export declare function deriveDisplayTitle(candidate: string | undefined, rawText: string, tags: string[]): string;
 export declare function deriveDisplaySummary(candidate: string | undefined, rawText: string): string;
 export declare function inferTags(rawText: string): string[];

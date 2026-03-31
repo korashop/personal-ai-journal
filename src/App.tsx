@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BookMarked, BrainCircuit, PenLine, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { EntryComposer } from './components/EntryComposer'
@@ -32,22 +32,25 @@ export default function App() {
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<EntryRecord | null>(null)
 
-  async function loadBootstrap(preferredEntryId?: string | null) {
+  const loadBootstrap = useCallback(async (preferredEntryId?: string | null, options?: { preserveSelection?: boolean }) => {
     try {
       setError(null)
       const response = await fetchBootstrap(preferredEntryId)
       setBootstrap(response)
-      const nextSelectedId = preferredEntryId ?? response.selectedEntry?.id ?? null
+      const nextSelectedId =
+        options?.preserveSelection
+          ? preferredEntryId ?? selectedEntryId ?? response.selectedEntry?.id ?? null
+          : preferredEntryId ?? response.selectedEntry?.id ?? null
       setSelectedEntryId(nextSelectedId)
       setSelectedEntry(response.selectedEntry)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load the journal')
     }
-  }
+  }, [selectedEntryId])
 
   useEffect(() => {
     void loadBootstrap()
-  }, [])
+  }, [loadBootstrap])
 
   const entries = useMemo(() => sortEntries(bootstrap?.entries ?? []), [bootstrap?.entries])
 
@@ -223,6 +226,7 @@ export default function App() {
               <EntryDetail
                 busy={busy}
                 entry={selectedEntry}
+                key={selectedEntry?.id ?? 'empty-entry'}
                 onBack={() => {
                   setSelectedEntryId(null)
                   setSelectedEntry(null)
@@ -245,7 +249,7 @@ export default function App() {
                 setView('entries')
               }}
               onRefreshAfterThemeReply={async () => {
-                await loadBootstrap()
+                await loadBootstrap(null, { preserveSelection: true })
               }}
               patterns={bootstrap.patterns}
             />

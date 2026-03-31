@@ -35,7 +35,7 @@ declare class DemoStore {
     getBootstrap(userId: string, selectedEntryId?: string | null): Promise<JournalBootstrapRecord>;
     createEntry(input: CreateEntryInput): Promise<JournalView>;
     updateEntry(input: UpdateEntryInput): Promise<JournalView>;
-    deleteEntry(entryId: string, _userId?: string): Promise<void>;
+    deleteEntry(entryId: string, userId?: string): Promise<void>;
     appendConversation(entryId: string, userContent: string, assistantContent: string): Promise<JournalView>;
     updateMemory(userId: string, content: string): Promise<{
         id: string;
@@ -43,8 +43,8 @@ declare class DemoStore {
         content: string;
         updatedAt: string;
     }>;
-    updatePatterns(_userId: string, patterns: PatternSection[]): Promise<PatternSection[]>;
-    getEntryView(entryId: string, _userId?: string): Promise<JournalView>;
+    updatePatterns(userId: string, patterns: PatternSection[]): Promise<PatternSection[]>;
+    getEntryView(entryId: string, userId?: string): Promise<JournalView>;
 }
 declare class SupabaseStore {
     private readonly client;

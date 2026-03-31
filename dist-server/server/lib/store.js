@@ -132,7 +132,8 @@ class DemoStore {
         }
         return this.getEntryView(input.entryId);
     }
-    async deleteEntry(entryId, _userId) {
+    async deleteEntry(entryId, userId) {
+        void userId;
         this.entries = this.entries.filter((entry) => entry.id !== entryId);
         this.conversations = this.conversations.filter((message) => message.entryId !== entryId);
     }
@@ -163,11 +164,13 @@ class DemoStore {
         };
         return this.memory;
     }
-    async updatePatterns(_userId, patterns) {
+    async updatePatterns(userId, patterns) {
+        void userId;
         this.patterns = patterns;
         return this.patterns;
     }
-    async getEntryView(entryId, _userId) {
+    async getEntryView(entryId, userId) {
+        void userId;
         const entry = this.entries.find((item) => item.id === entryId);
         if (!entry) {
             throw new Error('Entry not found');
