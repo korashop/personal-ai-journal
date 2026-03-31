@@ -26,6 +26,35 @@ function statusNote(pattern: PatternSection) {
   return 'This theme seems durable enough to keep tracking over time.'
 }
 
+function normalizeForComparison(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function overlapScore(left: string, right: string) {
+  const leftTokens = new Set(normalizeForComparison(left).split(' ').filter((token) => token.length > 3))
+  const rightTokens = new Set(normalizeForComparison(right).split(' ').filter((token) => token.length > 3))
+  if (!leftTokens.size || !rightTokens.size) return 0
+  let shared = 0
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) shared += 1
+  }
+  return shared / Math.max(leftTokens.size, rightTokens.size)
+}
+
+function filterDistinctLines(lines: string[], seedText: string) {
+  const kept: string[] = []
+  for (const line of lines) {
+    if (overlapScore(line, seedText) > 0.45) continue
+    if (kept.some((existing) => overlapScore(existing, line) > 0.55)) continue
+    kept.push(line)
+  }
+  return kept
+}
+
 type PatternsViewProps = {
   entries: EntryListItem[]
   memoryDoc: MemoryDocument | null
@@ -46,6 +75,25 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   const [message, setMessage] = useState('')
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('journal-theme-threads')
+      if (stored) {
+        setThemeThreads(JSON.parse(stored) as Record<string, ThemeMessage[]>)
+      }
+    } catch {
+      // Ignore local storage issues and keep the thread in-memory only.
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('journal-theme-threads', JSON.stringify(themeThreads))
+    } catch {
+      // Ignore local storage issues and keep the thread in-memory only.
+    }
+  }, [themeThreads])
 
   useEffect(() => {
     if (!patterns.length) {
@@ -73,11 +121,19 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
     [selectedPattern, themeThreads],
   )
 
-  const latestSupportingEntry = useMemo(() => {
-    return [...supportingEntries].sort(
-      (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-    )[0] ?? null
-  }, [supportingEntries])
+  const distinctDimensions = useMemo(
+    () => filterDistinctLines(selectedPattern?.dimensions ?? [], selectedPattern?.overview ?? ''),
+    [selectedPattern],
+  )
+
+  const distinctQuestions = useMemo(
+    () =>
+      filterDistinctLines(
+        selectedPattern?.questions ?? [],
+        `${selectedPattern?.overview ?? ''}\n${(selectedPattern?.dimensions ?? []).join('\n')}`,
+      ),
+    [selectedPattern],
+  )
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -195,46 +251,37 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
               <ReactMarkdown>{selectedPattern.overview}</ReactMarkdown>
             </article>
 
-            {latestSupportingEntry ? (
-              <div className="pattern-recent-note">
-                <p className="subtle-label">Recently activated by</p>
-                <div className="pattern-recent-body">
-                  <strong>{latestSupportingEntry.title}</strong>
-                  <span>{clip(latestSupportingEntry.summary, 180)}</span>
-                  <button className="ghost-button" onClick={() => onOpenEntry(latestSupportingEntry.id)} type="button">
-                    Open entry
-                  </button>
+            <div className="pattern-detail-grid simplified">
+              {distinctDimensions.length ? (
+                <div className="pattern-column wide">
+                  <p className="subtle-label">How it shows up</p>
+                  <ul className="pattern-list compact">
+                    {distinctDimensions.map((dimension) => (
+                      <li className="pattern-list-item compact" key={dimension}>
+                        <ReactMarkdown>{dimension}</ReactMarkdown>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
 
-            <div className="pattern-detail-grid">
-              <div className="pattern-column wide">
-                <p className="subtle-label">Important dimensions</p>
-                <ul className="pattern-list">
-                  {selectedPattern.dimensions.map((dimension) => (
-                    <li className="pattern-list-item" key={dimension}>
-                      <ReactMarkdown>{dimension}</ReactMarkdown>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="pattern-column wide">
-                <p className="subtle-label">Questions in play</p>
-                <ul className="pattern-list">
-                  {selectedPattern.questions.map((question) => (
-                    <li className="pattern-list-item" key={question}>
-                      <ReactMarkdown>{question}</ReactMarkdown>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              {distinctQuestions.length ? (
+                <div className="pattern-column wide">
+                  <p className="subtle-label">Questions in play</p>
+                  <ul className="pattern-list compact">
+                    {distinctQuestions.map((question) => (
+                      <li className="pattern-list-item compact" key={question}>
+                        <ReactMarkdown>{question}</ReactMarkdown>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
 
             {selectedPattern.exploreOptions.length ? (
               <div className="pattern-explore">
-                <p className="subtle-label">Ways to explore this</p>
+                <p className="subtle-label">Try a line of inquiry</p>
                 <div className="explore-options stacked">
                   {selectedPattern.exploreOptions.map((option) => (
                     <button className="option-chip" key={option} onClick={() => setMessage(option)} type="button">
@@ -246,7 +293,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
             ) : null}
 
             <div className="pattern-entry-links">
-              <p className="subtle-label">Related entries</p>
+              <p className="subtle-label">Where this shows up</p>
               <div className="related-entry-list">
                 {supportingEntries.map((entry) => (
                   <button className="related-entry-card" key={entry.id} onClick={() => onOpenEntry(entry.id)} type="button">
@@ -280,7 +327,9 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                     <ReactMarkdown>{threadMessage.content}</ReactMarkdown>
                   </article>
                 ))}
-                <p className="muted pattern-reply-note">This exchange has been folded back into the living memory and theme state.</p>
+                <p className="muted pattern-reply-note">
+                  This thread is saved on this device and its ideas are folded back into the living memory and theme state.
+                </p>
               </div>
             ) : null}
 

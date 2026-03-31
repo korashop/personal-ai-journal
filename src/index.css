@@ -745,6 +745,15 @@ button {
   min-height: 132px;
 }
 
+.pattern-list.compact {
+  grid-template-columns: 1fr;
+}
+
+.pattern-list-item.compact {
+  min-height: 0;
+  padding: 16px 18px;
+}
+
 .pattern-recent-note {
   display: flex;
   flex-direction: column;
@@ -1063,6 +1072,10 @@ button {
   gap: 12px;
 }
 
+.pattern-detail-grid.simplified {
+  gap: 14px;
+}
+
 .pattern-column.wide .pattern-items {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1112,6 +1125,10 @@ button {
   gap: 6px;
   text-align: left;
   color: inherit;
+}
+
+.related-entry-card strong {
+  line-height: 1.35;
 }
 
 .memory-doc {

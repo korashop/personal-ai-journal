@@ -553,6 +553,71 @@ function scorePatternMatch(left: PatternSection, right: Omit<PatternSection, 'id
   return (titleOverlap ? 3 : 0) + sharedEntryIds * 2 + (sharedDimension ? 1 : 0)
 }
 
+function dedupePatternLines(lines: string[], seedText = '') {
+  const kept: string[] = []
+  const normalize = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const overlap = (left: string, right: string) => {
+    const leftTokens = new Set(normalize(left).split(' ').filter((token) => token.length > 3))
+    const rightTokens = new Set(normalize(right).split(' ').filter((token) => token.length > 3))
+    if (!leftTokens.size || !rightTokens.size) return 0
+    let shared = 0
+    for (const token of leftTokens) {
+      if (rightTokens.has(token)) shared += 1
+    }
+    return shared / Math.max(leftTokens.size, rightTokens.size)
+  }
+
+  for (const line of lines) {
+    if (seedText && overlap(line, seedText) > 0.5) continue
+    if (kept.some((existing) => overlap(existing, line) > 0.58)) continue
+    kept.push(line)
+  }
+
+  return kept
+}
+
+function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>) {
+  const merged: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>> = []
+
+  for (const pattern of patterns) {
+    const existing = merged.find((candidate) => {
+      const titleScore = normalizePatternTitle(candidate.title) === normalizePatternTitle(pattern.title)
+      const sharedEntries = pattern.entryIds.filter((entryId) => candidate.entryIds.includes(entryId)).length
+      return titleScore || sharedEntries >= Math.min(2, pattern.entryIds.length)
+    })
+
+    if (!existing) {
+      merged.push({
+        ...pattern,
+        dimensions: dedupePatternLines(pattern.dimensions, pattern.overview).slice(0, 4),
+        questions: dedupePatternLines(pattern.questions, `${pattern.overview}\n${pattern.dimensions.join('\n')}`).slice(0, 3),
+        exploreOptions: dedupePatternLines(pattern.exploreOptions).slice(0, 3),
+      })
+      continue
+    }
+
+    existing.entryIds = [...new Set([...existing.entryIds, ...pattern.entryIds])]
+    existing.dimensions = dedupePatternLines([...existing.dimensions, ...pattern.dimensions], existing.overview).slice(0, 4)
+    existing.questions = dedupePatternLines(
+      [...existing.questions, ...pattern.questions],
+      `${existing.overview}\n${existing.dimensions.join('\n')}`,
+    ).slice(0, 3)
+    existing.exploreOptions = dedupePatternLines([...existing.exploreOptions, ...pattern.exploreOptions]).slice(0, 3)
+    if (pattern.overview.length > existing.overview.length) {
+      existing.overview = pattern.overview
+      existing.title = simplifyPatternTitle(pattern.title)
+    }
+  }
+
+  return merged
+}
+
 function reconcilePatterns(
   previousPatterns: PatternSection[],
   nextPatterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>,
@@ -663,6 +728,12 @@ Rules:
 - Do not just repeat entry text. Synthesize.
 - Prefer psychological or decision-making patterns over broad topic tags.
 - If a broad domain like work appears, refine it into the actual thread inside the writing.
+- The overview, dimensions, and questions must do different jobs:
+  - overview = the mechanism and why it matters now
+  - dimensions = distinct facets or tensions inside the pattern
+  - questions = genuinely open lines of inquiry
+- Do not repeat the same sentence or paraphrase across overview, dimensions, and questions.
+- Do not just restate one recent entry in all three places.
 
 Memory:
 ${memoryDoc?.content ?? 'No memory document yet.'}
@@ -718,7 +789,7 @@ ${previousPatterns.length
         }))
 
       if (patterns.length) {
-        const paddedPatterns = [...patterns]
+        const paddedPatterns = dedupeAndRefinePatterns(patterns)
 
         for (const heuristicPattern of heuristicPatterns) {
           const overlapsExisting = paddedPatterns.some(
@@ -732,7 +803,7 @@ ${previousPatterns.length
           }
         }
 
-        return reconcilePatterns(previousPatterns, paddedPatterns)
+        return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))
       }
     } catch {
       // Fall through to heuristic build.
