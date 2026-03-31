@@ -9,6 +9,7 @@ import type { EntryRecord } from '../types'
 type EntryDetailProps = {
   busy: boolean
   entry: EntryRecord | null
+  loadingEntry: boolean
   onBack: () => void
   onDelete: () => Promise<void>
   onReanalyze: () => Promise<void>
@@ -16,7 +17,7 @@ type EntryDetailProps = {
   onSaveEdit: (rawText: string) => Promise<void>
 }
 
-export function EntryDetail({ busy, entry, onBack, onDelete, onReanalyze, onReply, onSaveEdit }: EntryDetailProps) {
+export function EntryDetail({ busy, entry, loadingEntry, onBack, onDelete, onReanalyze, onReply, onSaveEdit }: EntryDetailProps) {
   const [reply, setReply] = useState('')
   const [showRawEntry, setShowRawEntry] = useState(false)
   const [showDeeperOptions, setShowDeeperOptions] = useState(false)
@@ -63,8 +64,12 @@ export function EntryDetail({ busy, entry, onBack, onDelete, onReanalyze, onRepl
   if (!entry) {
     return (
       <section className="panel detail-panel empty-state">
-        <h2>Select an entry to open it.</h2>
-        <p className="muted">The list is the home base here. Open one when you want to go deep.</p>
+        <h2>{loadingEntry ? 'Opening entry...' : 'Select an entry to open it.'}</h2>
+        <p className="muted">
+          {loadingEntry
+            ? 'The entry is loading now.'
+            : 'The list is the home base here. Open one when you want to go deep.'}
+        </p>
       </section>
     )
   }

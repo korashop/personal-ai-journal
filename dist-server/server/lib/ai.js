@@ -10,6 +10,32 @@ function clipForPrompt(text, maxLength) {
     const cleaned = normalizeWhitespace(text);
     return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength).trim()}...` : cleaned;
 }
+function clipLongEntryForAnalysis(text, maxLength = 12000) {
+    const cleaned = sanitizeJournalText(text);
+    if (cleaned.length <= maxLength)
+        return cleaned;
+    const paragraphs = cleaned
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    if (!paragraphs.length) {
+        return clipForPrompt(cleaned, maxLength);
+    }
+    const firstChunk = paragraphs.slice(0, 10).join('\n');
+    const middleStart = Math.max(Math.floor(paragraphs.length / 2) - 4, 0);
+    const middleChunk = paragraphs.slice(middleStart, middleStart + 8).join('\n');
+    const lastChunk = paragraphs.slice(-10).join('\n');
+    return [
+        '[Beginning]',
+        clipForPrompt(firstChunk, Math.floor(maxLength * 0.36)),
+        '',
+        '[Middle]',
+        clipForPrompt(middleChunk, Math.floor(maxLength * 0.24)),
+        '',
+        '[End]',
+        clipForPrompt(lastChunk, Math.floor(maxLength * 0.36)),
+    ].join('\n');
+}
 function slugify(text) {
     return text
         .toLowerCase()
@@ -304,11 +330,13 @@ ${malformedResponse}`;
 }
 export async function generateAnalysis(rawText, tags, context) {
     const cleanedRaw = sanitizeJournalText(rawText) || rawText;
+    const analysisEntryText = clipLongEntryForAnalysis(cleanedRaw, 12000);
+    const isLongEntry = cleanedRaw.length > 9000;
     if (!anthropic) {
         return fallbackAnalysis(cleanedRaw, tags);
     }
-    const recentEntryLines = recentEntriesForPrompt(context.recentEntries);
-    const highlightLines = highlightsForPrompt(context.relevantHighlights);
+    const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 3 : 4, isLongEntry ? 140 : 180);
+    const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 120 : 150);
     const prompt = `You are a direct, highly useful thinking partner with cumulative memory.
 Never congratulate the user for journaling.
 Do not force a fixed structure if the entry does not need it.
@@ -336,9 +364,11 @@ Rules:
 - Do not simply restate the first section in shorter form.
 - Explore options should feel like meaningful next angles, not generic prompts.
 - Feed labels should be short and useful, not broad buckets unless those are genuinely the right level.
+- If the entry is long, account for the whole thing. Do not analyze only the beginning and ignore later turns.
+- If you notice a change between the beginning, middle, and end, include that movement in the analysis.
 
 Memory doc:
-${memoryForPrompt(context.memoryDoc)}
+${memoryForPrompt(context.memoryDoc, isLongEntry ? 1400 : 2400)}
 
 Recent entries:
 ${recentEntryLines}
@@ -350,10 +380,10 @@ Tags:
 ${tags.join(', ') || 'None'}
 
 New entry:
-${cleanedRaw}`;
+${analysisEntryText}`;
     const response = await anthropic.messages.create({
         model: config.anthropicModel,
-        max_tokens: 1500,
+        max_tokens: isLongEntry ? 2200 : 1600,
         messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content
@@ -363,7 +393,7 @@ ${cleanedRaw}`;
     try {
         const parsed = parseJsonFromText(text);
         if (!parsed) {
-            return fallbackAnalysis(rawText, tags);
+            return fallbackAnalysis(cleanedRaw, tags);
         }
         const sections = (parsed.sections ?? [])
             .filter((section) => section.title && section.content)
@@ -373,7 +403,7 @@ ${cleanedRaw}`;
             content: section.content.trim(),
         }));
         if (!sections.length) {
-            return fallbackAnalysis(rawText, tags);
+            return fallbackAnalysis(cleanedRaw, tags);
         }
         const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3);
         return {
@@ -650,7 +680,7 @@ ${previousPatternsForPrompt(previousPatterns)}
 `;
         const response = await anthropic.messages.create({
             model: config.anthropicModel,
-            max_tokens: 900,
+            max_tokens: 1400,
             messages: [{ role: 'user', content: prompt }],
         });
         const text = response.content

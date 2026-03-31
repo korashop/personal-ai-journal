@@ -32,10 +32,13 @@ export default function App() {
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<EntryRecord | null>(null)
 
-  const loadBootstrap = useCallback(async (preferredEntryId?: string | null, options?: { preserveSelection?: boolean }) => {
+  const loadBootstrap = useCallback(async (
+    preferredEntryId?: string | null,
+    options?: { preserveSelection?: boolean; rebuildPatterns?: boolean },
+  ) => {
     try {
       setError(null)
-      const response = await fetchBootstrap(preferredEntryId)
+      const response = await fetchBootstrap(preferredEntryId, { rebuildPatterns: options?.rebuildPatterns })
       setBootstrap(response)
       const nextSelectedId =
         options?.preserveSelection
@@ -163,7 +166,9 @@ export default function App() {
     try {
       setBusy(true)
       setError(null)
-      await loadBootstrap(view === 'entries' ? selectedEntryId : null)
+      await loadBootstrap(view === 'entries' ? selectedEntryId : null, {
+        rebuildPatterns: view === 'patterns',
+      })
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : 'Could not refresh the journal')
     } finally {
@@ -213,10 +218,10 @@ export default function App() {
           {view === 'capture' ? <EntryComposer busy={busy} onSubmit={handleCreateEntry} /> : null}
 
           {view === 'entries' ? (
-            <section className={`entries-layout ${selectedEntry ? 'detail-open' : 'list-open'}`}>
+            <section className={`entries-layout ${selectedEntryId ? 'detail-open' : 'list-open'}`}>
               <EntryFeed
                 entries={entries}
-                mode={selectedEntry ? 'detail' : 'list'}
+                mode={selectedEntryId ? 'detail' : 'list'}
                 onSelect={(entryId) => {
                   setSelectedEntryId(entryId)
                   setSelectedEntry(null)
@@ -227,6 +232,7 @@ export default function App() {
                 busy={busy}
                 entry={selectedEntry}
                 key={selectedEntry?.id ?? 'empty-entry'}
+                loadingEntry={Boolean(selectedEntryId && !selectedEntry)}
                 onBack={() => {
                   setSelectedEntryId(null)
                   setSelectedEntry(null)

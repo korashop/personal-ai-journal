@@ -23,8 +23,18 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export async function fetchBootstrap(entryId?: string | null): Promise<JournalBootstrap> {
-  const query = entryId ? `?entryId=${encodeURIComponent(entryId)}` : ''
+export async function fetchBootstrap(
+  entryId?: string | null,
+  options?: { rebuildPatterns?: boolean },
+): Promise<JournalBootstrap> {
+  const params = new URLSearchParams()
+  if (entryId) {
+    params.set('entryId', entryId)
+  }
+  if (options?.rebuildPatterns) {
+    params.set('rebuildPatterns', '1')
+  }
+  const query = params.size ? `?${params.toString()}` : ''
   const response = await fetch(apiUrl(`/api/bootstrap${query}`))
   return parseResponse<JournalBootstrap>(response)
 }

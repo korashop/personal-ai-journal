@@ -471,6 +471,11 @@ button {
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 0;
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
+  position: relative;
 }
 
 .entry-browser.compact .entry-row {
@@ -813,6 +818,14 @@ button {
   gap: 14px;
 }
 
+.pattern-thread-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .pattern-thread-summary {
   margin: 6px 0 0;
   color: var(--muted);
@@ -834,6 +847,9 @@ button {
 .pattern-thread {
   margin-top: 0;
   min-height: 220px;
+  max-height: 540px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .pattern-thread .message {
@@ -907,6 +923,11 @@ button {
   margin: 0;
   font-size: 1.04rem;
   line-height: 1.7;
+}
+
+.pattern-overview.expanded,
+.pattern-list-item.compact {
+  overflow-wrap: anywhere;
 }
 
 .back-button {
@@ -1349,6 +1370,10 @@ button {
 
   .pattern-thread-header {
     align-items: flex-start;
+  }
+
+  .pattern-thread-actions {
+    justify-content: flex-start;
   }
 
   .patterns-shell.detail-mode .patterns-list.compact {
