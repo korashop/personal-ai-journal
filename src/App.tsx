@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookMarked, BrainCircuit, PenLine, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { EntryComposer } from './components/EntryComposer'
@@ -31,25 +31,30 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<EntryRecord | null>(null)
+  const selectedEntryIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    selectedEntryIdRef.current = selectedEntryId
+  }, [selectedEntryId])
 
   const loadBootstrap = useCallback(async (
     preferredEntryId?: string | null,
-    options?: { preserveSelection?: boolean; rebuildPatterns?: boolean },
+    options?: { preserveSelection?: boolean },
   ) => {
     try {
       setError(null)
-      const response = await fetchBootstrap(preferredEntryId, { rebuildPatterns: options?.rebuildPatterns })
+      const response = await fetchBootstrap(preferredEntryId)
       setBootstrap(response)
       const nextSelectedId =
         options?.preserveSelection
-          ? preferredEntryId ?? selectedEntryId ?? response.selectedEntry?.id ?? null
+          ? preferredEntryId ?? selectedEntryIdRef.current ?? response.selectedEntry?.id ?? null
           : preferredEntryId ?? response.selectedEntry?.id ?? null
       setSelectedEntryId(nextSelectedId)
       setSelectedEntry(response.selectedEntry)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load the journal')
     }
-  }, [selectedEntryId])
+  }, [])
 
   useEffect(() => {
     void loadBootstrap()
@@ -166,9 +171,7 @@ export default function App() {
     try {
       setBusy(true)
       setError(null)
-      await loadBootstrap(view === 'entries' ? selectedEntryId : null, {
-        rebuildPatterns: view === 'patterns',
-      })
+      await loadBootstrap(view === 'entries' ? selectedEntryId : null)
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : 'Could not refresh the journal')
     } finally {
