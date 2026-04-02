@@ -1220,6 +1220,64 @@ function scoreTextSpecificity(text) {
         score -= 1;
     return score;
 }
+function scoreThemeCoherence(title, overview, dimensions) {
+    const anchor = `${title} ${overview}`.trim();
+    const anchorScores = dimensions
+        .map((dimension) => semanticSimilarity(anchor, dimension))
+        .filter((score) => score > 0);
+    const averageAnchorScore = anchorScores.length
+        ? anchorScores.reduce((sum, score) => sum + score, 0) / anchorScores.length
+        : 0;
+    const pairScores = [];
+    dimensions.forEach((left, leftIndex) => {
+        dimensions.slice(leftIndex + 1).forEach((right) => {
+            const score = semanticSimilarity(left, right);
+            if (score > 0)
+                pairScores.push(score);
+        });
+    });
+    const averagePairScore = pairScores.length
+        ? pairScores.reduce((sum, score) => sum + score, 0) / pairScores.length
+        : 0;
+    const coherence = Math.max(averageAnchorScore, averagePairScore);
+    if (coherence >= 0.45)
+        return 5;
+    if (coherence >= 0.3)
+        return 3;
+    if (coherence >= 0.18)
+        return 1;
+    return 0;
+}
+function scoreThemeCharge(text) {
+    const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(text)));
+    let score = 0;
+    if (/\b(want|need|desire|longing|mission|meaning|alignment|surrender|attunement|love|family|build|ship|create|ask)\b/i.test(clean)) {
+        score += 2;
+    }
+    if (/\b(fear|shame|jealous|regret|stuck|avoid|defense|prove|permission|imposter|risk|uncertain|tension)\b/i.test(clean)) {
+        score += 2;
+    }
+    if (/\b(decision|question|what would|how to|test|move|toward|change|cost)\b/i.test(clean)) {
+        score += 1;
+    }
+    return score;
+}
+function scoreQuestionUsefulness(questions) {
+    return questions.reduce((sum, question) => {
+        let score = 0;
+        if (/\bwhat|how|where\b/i.test(question))
+            score += 1;
+        if (/\btest|move|shift|require|reveal|cost|different|concrete\b/i.test(question))
+            score += 1;
+        if (!/what keeps this theme in place right now|what concrete move would test a different way/i.test(question)) {
+            score += 1;
+        }
+        return sum + score;
+    }, 0);
+}
+function scoreThemeStatus(status) {
+    return status === 'deepening' ? 2 : status === 'active' ? 1 : 0;
+}
 function scoreThemeSignal(pattern) {
     const distinctDimensions = dedupePatternLines(pattern.dimensions, pattern.overview);
     const entryCount = pattern.entryIds.length;
@@ -1233,8 +1291,31 @@ function scoreThemeSignal(pattern) {
         distinctDimensions.length === 2 ? 2 :
             0;
     const overviewScore = Math.max(0, scoreTextSpecificity(pattern.overview));
+    const coherenceScore = scoreThemeCoherence(pattern.title, pattern.overview, distinctDimensions);
+    const chargeScore = Math.min(8, scoreThemeCharge(pattern.overview) +
+        distinctDimensions.reduce((sum, dimension) => sum + scoreThemeCharge(dimension), 0));
+    const questionScore = Math.min(4, scoreQuestionUsefulness(pattern.questions));
     const singletonPenalty = entryCount === 1 && distinctDimensions.length < 2 ? 2 : 0;
-    return recurrenceScore + evidenceBreadthScore + dimensionScore + titleScore + overviewScore - singletonPenalty;
+    return (recurrenceScore +
+        evidenceBreadthScore +
+        dimensionScore +
+        titleScore +
+        overviewScore +
+        coherenceScore +
+        chargeScore +
+        questionScore -
+        singletonPenalty);
+}
+function compareThemePriority(left, right) {
+    const rightScore = scoreThemeSignal(right) + scoreThemeStatus('status' in right ? right.status : undefined);
+    const leftScore = scoreThemeSignal(left) + scoreThemeStatus('status' in left ? left.status : undefined);
+    if (rightScore !== leftScore)
+        return rightScore - leftScore;
+    const rightCount = right.entryIds.length;
+    const leftCount = left.entryIds.length;
+    if (rightCount !== leftCount)
+        return rightCount - leftCount;
+    return left.title.localeCompare(right.title);
 }
 function themeTokenSet(title) {
     return new Set(normalizePatternTitle(title)
@@ -1456,15 +1537,7 @@ function buildDeterministicPatterns(entries, previousPatterns) {
         .map((cluster) => buildDeterministicPatternFromCluster(cluster))
         .filter((pattern) => patternHasEnoughThemeEvidence(pattern));
     return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
-        .sort((left, right) => {
-        const rightScore = scoreThemeSignal(right) + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0);
-        const leftScore = scoreThemeSignal(left) + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0);
-        if (rightScore !== leftScore)
-            return rightScore - leftScore;
-        if (right.entryCount !== left.entryCount)
-            return right.entryCount - left.entryCount;
-        return left.title.localeCompare(right.title);
-    })
+        .sort(compareThemePriority)
         .slice(0, 8);
 }
 function patternsLookWeak(patterns, entriesCount) {
@@ -1516,6 +1589,52 @@ function enrichedPatternLooksWeak(pattern) {
     if (pattern.questions.some((item) => looksTruncatedPatternText(item)))
         return true;
     return false;
+}
+function stripPatternIdentity(pattern) {
+    return {
+        title: pattern.title,
+        overview: pattern.overview,
+        dimensions: pattern.dimensions,
+        questions: pattern.questions,
+        exploreOptions: pattern.exploreOptions,
+        entryIds: pattern.entryIds,
+    };
+}
+function patternsReferToSameTheme(left, right) {
+    const sharedEntryCount = left.entryIds.filter((id) => right.entryIds.includes(id)).length;
+    const entryOverlap = sharedEntryCount / Math.max(left.entryIds.length, right.entryIds.length, 1);
+    return (normalizePatternTitle(left.title) === normalizePatternTitle(right.title) ||
+        themeTitleSimilarity(left.title, right.title) >= 0.62 ||
+        semanticSimilarity(`${left.title} ${left.overview}`, `${right.title} ${right.overview}`) >= 0.72 ||
+        (entryOverlap >= 0.6 && semanticSimilarity(left.overview, right.overview) >= 0.3));
+}
+function mergeEnrichedWithFallbackPatterns(enrichedPatterns, fallbackPatterns) {
+    const merged = [...enrichedPatterns];
+    for (const fallback of fallbackPatterns.map((pattern) => stripPatternIdentity(pattern))) {
+        const duplicateIndex = merged.findIndex((pattern) => patternsReferToSameTheme(pattern, fallback));
+        if (duplicateIndex === -1) {
+            merged.push(fallback);
+            continue;
+        }
+        const existing = merged[duplicateIndex];
+        if (scoreThemeSignal(fallback) > scoreThemeSignal(existing)) {
+            merged[duplicateIndex] = {
+                ...fallback,
+                title: existing.title,
+                questions: dedupePatternLines(existing.questions, fallback.questions.join('\n')).length
+                    ? existing.questions
+                    : fallback.questions,
+                exploreOptions: dedupePatternLines([...existing.exploreOptions, ...fallback.exploreOptions]).slice(0, 3),
+            };
+        }
+        else if (fallback.entryIds.length > existing.entryIds.length) {
+            merged[duplicateIndex] = {
+                ...existing,
+                entryIds: [...new Set([...existing.entryIds, ...fallback.entryIds])],
+            };
+        }
+    }
+    return dedupeAndRefinePatterns(merged).sort(compareThemePriority);
 }
 function matchEnrichedCluster(cluster, parsed, fallbackIndex) {
     return (parsed.find((item) => item.clusterId === cluster.clusterId) ??
@@ -1654,19 +1773,10 @@ export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
     }
     const enriched = await enrichPatternClustersWithModel(memoryDoc, recentEntries, previousPatterns, clusters).catch(() => null);
     if (enriched?.patterns.length) {
-        const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(enriched.patterns));
+        const mergedPatterns = mergeEnrichedWithFallbackPatterns(enriched.patterns, deterministicPatterns);
+        const reconciled = reconcilePatterns(previousPatterns, mergedPatterns);
         if (!patternsLookWeak(reconciled, recentEntries.length)) {
-            return reconciled
-                .sort((left, right) => {
-                const rightScore = scoreThemeSignal(right) + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0);
-                const leftScore = scoreThemeSignal(left) + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0);
-                if (rightScore !== leftScore)
-                    return rightScore - leftScore;
-                if (right.entryCount !== left.entryCount)
-                    return right.entryCount - left.entryCount;
-                return left.title.localeCompare(right.title);
-            })
-                .slice(0, 9);
+            return reconciled.sort(compareThemePriority).slice(0, 9);
         }
     }
     return deterministicPatterns;
