@@ -112,11 +112,18 @@ function triggerDerivedRefresh(userId: string) {
   })
 }
 
-function shouldRefreshPatterns(entriesCount: number, patterns: Array<{ overview: string; dimensions: string[]; questions: string[] }>) {
+function shouldRefreshPatterns(
+  entriesCount: number,
+  patterns: Array<{ overview: string; dimensions: string[]; questions: string[]; status?: string; entryCount?: number; title?: string }>,
+) {
   if (!patterns.length) return true
   if (entriesCount >= 10 && patterns.length <= 3) return true
+  const singletonCount = patterns.filter((pattern) => (pattern.entryCount ?? 0) <= 1).length
+  if (patterns.length >= 5 && singletonCount / patterns.length >= 0.6) return true
+  if (patterns.length >= 4 && patterns.every((pattern) => pattern.status === 'emerging')) return true
 
   return patterns.some((pattern) =>
+    /(?:\.{3,}|…)\s*$/.test(pattern.title ?? '') ||
     /(?:\.{3,}|…)\s*$/.test(pattern.overview) ||
     pattern.dimensions.some((dimension) => /(?:\.{3,}|…)\s*$/.test(dimension)) ||
     pattern.questions.some((question) => /(?:\.{3,}|…)\s*$/.test(question)),

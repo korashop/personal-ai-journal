@@ -293,7 +293,7 @@ function looksAbstractDigestLine(line: string) {
 
 function finalizeEntryDigest(candidateLines: string[] | undefined, rawText: string) {
   const aiLines = (candidateLines ?? [])
-    .map((line) => cleanTruncatedEnding(line))
+    .map((line) => normalizeDigestBullet(line))
     .filter(Boolean)
     .filter((line) => !looksAbstractDigestLine(line))
 
@@ -313,6 +313,14 @@ function finalizeEntryDigest(candidateLines: string[] | undefined, rawText: stri
   }
 
   return deduped.slice(0, 5)
+}
+
+function normalizeDigestBullet(text: string) {
+  return cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(text)))
+    .replace(/:\s*-\s*[A-Za-z0-9]{0,2}\s*$/g, '')
+    .replace(/\s*-\s*[A-Za-z0-9]{1,2}\s*$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }
 
 type SummaryLayer = {
@@ -361,12 +369,12 @@ function buildEntryDigestFromSections(
     .filter((section) => !isGenericSectionTitle(section.title))
     .map((section) => {
       const title = cleanTruncatedEnding(section.title)
-      const sentence = firstSentence(section.content, 110)
+      const sentence = normalizeDigestBullet(firstSentence(section.content, 110))
       if (!title && !sentence) return ''
       if (!sentence) return title
       if (!title) return sentence
       if (sentence.toLowerCase().startsWith(title.toLowerCase())) return sentence
-      return clip(`${title}: ${sentence}`, 150)
+      return normalizeDigestBullet(clip(`${title}: ${sentence}`, 150))
     })
     .filter(Boolean)
 

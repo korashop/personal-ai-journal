@@ -6,6 +6,15 @@ import type { FormEvent } from 'react'
 
 import type { EntryRecord } from '../types'
 
+function cleanDigestBullet(text: string) {
+  return text
+    .replace(/[*_`#]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/:\s*-\s*[A-Za-z0-9]{0,2}\s*$/g, '')
+    .replace(/\s*-\s*[A-Za-z0-9]{1,2}\s*$/g, '')
+    .trim()
+}
+
 type EntryDetailProps = {
   busy: boolean
   entry: EntryRecord | null
@@ -127,7 +136,7 @@ export function EntryDetail({ busy, entry, loadingEntry, onBack, onDelete, onRea
             <p className="subtle-label">At a glance</p>
             <ul className="entry-digest-list">
               {entry.analysis.entryDigest.map((bullet) => (
-                <li key={bullet}>{bullet}</li>
+                <li key={bullet}>{cleanDigestBullet(bullet)}</li>
               ))}
             </ul>
           </div>
