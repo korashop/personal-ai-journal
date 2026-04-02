@@ -22,6 +22,12 @@ function statusNote(pattern: PatternSection) {
   return 'This theme seems durable enough to keep tracking over time.'
 }
 
+function prominenceLabel(pattern: PatternSection, index: number) {
+  if (pattern.prominence === 'dominant' || index < 2) return 'Dominant right now'
+  if (pattern.prominence === 'quiet' || pattern.entryCount <= 1) return 'Quiet signal'
+  return 'Active thread'
+}
+
 function normalizeForComparison(text: string) {
   return text
     .toLowerCase()
@@ -111,7 +117,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   }, [selectedPatternId])
 
   useEffect(() => {
-    if (patterns.length > 3 || entries.length < 10) {
+    if (patterns.length > 4 || entries.length < 10) {
       setStaleSyncAttempts(0)
       return
     }
@@ -155,6 +161,33 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
       ),
     [selectedPattern],
   )
+
+  const patternGroups = useMemo(() => {
+    const dominant = patterns.slice(0, 2)
+    const supporting = patterns.slice(2).filter((pattern) => (pattern.prominence ?? (pattern.entryCount <= 1 ? 'quiet' : 'supporting')) === 'supporting')
+    const quiet = patterns.slice(2).filter((pattern) => (pattern.prominence ?? (pattern.entryCount <= 1 ? 'quiet' : 'supporting')) === 'quiet')
+
+    return [
+      {
+        id: 'dominant',
+        title: 'Dominant right now',
+        summary: 'The themes with the strongest mix of recurrence, coherence, and live charge.',
+        patterns: dominant,
+      },
+      {
+        id: 'supporting',
+        title: 'Active undercurrents',
+        summary: 'Meaningful threads that are present, but not carrying the whole dashboard.',
+        patterns: supporting,
+      },
+      {
+        id: 'quiet',
+        title: 'Quiet signals',
+        summary: 'Early or more specific themes worth keeping in the map without over-promoting them.',
+        patterns: quiet,
+      },
+    ].filter((group) => group.patterns.length)
+  }, [patterns])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -245,16 +278,35 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
       <div className="patterns-detail">
         {!selectedPattern ? (
           <div className="panel pattern-focus">
-            <div className="pattern-home-list">
-              {patterns.map((pattern) => (
-                <button className="pattern-home-card" key={pattern.id} onClick={() => setSelectedPatternId(pattern.id)} type="button">
-                  <div className="pattern-home-meta">
-                    <strong>{pattern.title}</strong>
-                    <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
+            <div className="pattern-home-stack">
+              {patternGroups.map((group) => (
+                <section className="pattern-tier-section" key={group.id}>
+                  <div className="pattern-tier-header">
+                    <p className="subtle-label">{group.title}</p>
+                    <p className="pattern-tier-summary">{group.summary}</p>
                   </div>
-                  <p className="pattern-home-preview">{pattern.overview}</p>
-                  <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
-                </button>
+                  <div className="pattern-home-list">
+                    {group.patterns.map((pattern) => {
+                      const globalIndex = patterns.findIndex((candidate) => candidate.id === pattern.id)
+                      return (
+                        <button
+                          className={`pattern-home-card ${globalIndex < 2 ? 'dominant' : ''}`}
+                          key={pattern.id}
+                          onClick={() => setSelectedPatternId(pattern.id)}
+                          type="button"
+                        >
+                          <div className="pattern-home-meta">
+                            <strong>{pattern.title}</strong>
+                            <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
+                          </div>
+                          <p className="pattern-prominence-copy">{prominenceLabel(pattern, globalIndex)}</p>
+                          <p className="pattern-home-preview">{pattern.overview}</p>
+                          <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
               ))}
             </div>
           </div>
@@ -303,7 +355,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                   <p className="subtle-label">How it shows up</p>
                   <ul className="pattern-list compact">
                     {distinctDimensions.map((dimension) => (
-                      <li className="pattern-list-item compact" key={dimension}>
+                      <li className="pattern-list-item relaxed" key={dimension}>
                         <ReactMarkdown>{dimension}</ReactMarkdown>
                       </li>
                     ))}
@@ -316,7 +368,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                   <p className="subtle-label">Questions worth testing</p>
                   <ul className="pattern-list compact">
                     {distinctQuestions.map((question) => (
-                      <li className="pattern-list-item compact" key={question}>
+                      <li className="pattern-list-item relaxed" key={question}>
                         <ReactMarkdown>{question}</ReactMarkdown>
                       </li>
                     ))}

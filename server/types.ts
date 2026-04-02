@@ -84,6 +84,7 @@ export type PatternSection = {
   title: string
   overview: string
   status: 'emerging' | 'active' | 'deepening'
+  prominence?: 'dominant' | 'supporting' | 'quiet'
   dimensions: string[]
   questions: string[]
   exploreOptions: string[]

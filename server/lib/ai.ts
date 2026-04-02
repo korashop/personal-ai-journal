@@ -1741,9 +1741,9 @@ function buildPatternClusters(entries: JournalEntry[]) {
   const recurringClusters = scoredClusters.filter((cluster) => cluster.entryIds.size >= 2)
   const singletonClusters = scoredClusters.filter((cluster) => cluster.entryIds.size === 1)
   const selectedClusters = [
-    ...recurringClusters.slice(0, 7),
-    ...(recurringClusters.length >= 4 ? singletonClusters.slice(0, 1) : singletonClusters.slice(0, Math.max(0, 5 - recurringClusters.length)).slice(0, 2)),
-  ].slice(0, 8)
+    ...recurringClusters.slice(0, 12),
+    ...singletonClusters.slice(0, recurringClusters.length >= 8 ? 2 : 4),
+  ].slice(0, 16)
 
   return selectedClusters.map((cluster, index): PatternClusterDraft => {
     const evidenceByEntry = [...cluster.evidenceByEntry.entries()]
@@ -1837,7 +1837,7 @@ function buildDeterministicPatterns(entries: JournalEntry[], previousPatterns: P
 
   return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
     .sort(compareThemePriority)
-    .slice(0, 8)
+    .slice(0, 16)
 }
 
 function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
@@ -2153,7 +2153,7 @@ export async function buildPatterns(
     const mergedPatterns = mergeEnrichedWithFallbackPatterns(enriched.patterns, deterministicPatterns)
     const reconciled = reconcilePatterns(previousPatterns, mergedPatterns)
     if (!patternsLookWeak(reconciled, recentEntries.length)) {
-      return reconciled.sort(compareThemePriority).slice(0, 9)
+      return reconciled.sort(compareThemePriority).slice(0, 16)
     }
   }
 

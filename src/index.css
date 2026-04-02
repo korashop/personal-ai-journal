@@ -781,6 +781,16 @@ button {
   padding: 16px 18px;
 }
 
+.pattern-list-item.relaxed {
+  min-height: 0;
+  padding: 20px 22px;
+}
+
+.pattern-list-item.relaxed p {
+  font-size: 1.04rem;
+  line-height: 1.8;
+}
+
 .pattern-recent-note {
   display: flex;
   flex-direction: column;
@@ -1105,6 +1115,31 @@ button {
   gap: 12px;
 }
 
+.pattern-home-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.pattern-tier-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pattern-tier-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pattern-tier-summary {
+  margin: 0;
+  max-width: 72ch;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
 .pattern-home-card {
   border-radius: 20px;
   border: 1px solid var(--border);
@@ -1117,6 +1152,13 @@ button {
   gap: 8px;
 }
 
+.pattern-home-card.dominant {
+  border-color: rgba(142, 184, 199, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(142, 184, 199, 0.08), transparent 42%),
+    rgba(255, 255, 255, 0.04);
+}
+
 .pattern-home-card strong {
   font-size: 1.08rem;
   line-height: 1.25;
@@ -1126,6 +1168,14 @@ button {
   margin: 0;
   color: var(--text);
   line-height: 1.6;
+}
+
+.pattern-prominence-copy {
+  margin: 0;
+  font-size: 0.76rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .pattern-home-meta,
@@ -1385,6 +1435,10 @@ button {
 
   .pattern-home-list {
     grid-template-columns: 1fr;
+  }
+
+  .pattern-home-stack {
+    gap: 22px;
   }
 
   .pattern-home-summary {
