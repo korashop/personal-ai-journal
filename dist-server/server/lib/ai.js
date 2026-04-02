@@ -56,18 +56,19 @@ function slugify(text) {
 function normalizeWhitespace(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
+const DANGLING_ENDING_PATTERN = /\s+\b(?:about|after|and|around|as|at|because|before|being|but|despite|for|from|if|in|into|like|of|on|or|over|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i;
 function cleanTruncatedEnding(text) {
     let normalized = text
         .trim()
         .replace(/[.…]+\s*$/, '')
         .trim()
-        .replace(/\s+\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i, '')
+        .replace(DANGLING_ENDING_PATTERN, '')
         .trim();
     if (!normalized)
         return '';
-    while (/\s+\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i.test(normalized)) {
+    while (DANGLING_ENDING_PATTERN.test(normalized)) {
         normalized = normalized
-            .replace(/\s+\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i, '')
+            .replace(DANGLING_ENDING_PATTERN, '')
             .trim();
     }
     if (!/[.!?]"?$/.test(normalized)) {
@@ -872,7 +873,7 @@ const THEME_FAMILIES = [
     {
         key: 'certainty-delay',
         title: 'Waiting for certainty',
-        test: /\bcertainty\b|\bclarity\b|\bwait(?:ing)?\b|\bhesitat(?:e|ion|ing)?\b|\bdelay(?:ed|ing)?\b|\bbefore visible action\b|\bvisible action\b|\blegitimi[sz]e\b/i,
+        test: /\bwait(?:ing)?\b|\bhesitat(?:e|ion|ing)?\b|\bdelay(?:ed|ing)?\b|\bbefore visible action\b|\bwhy did i wait\b|\blegitimi[sz]e\b|\bneed clarity before\b|\bwaiting for certainty\b/i,
         questions: [
             'What concrete move would create more information than more reflection?',
             'What are you hoping certainty will spare you from feeling?',
@@ -900,6 +901,47 @@ function themeCandidateIsSelfConsistent(title, evidence) {
         return true;
     const evidenceFamily = themeFamilyForText(evidence);
     return evidenceFamily?.key === titleFamily.key;
+}
+function evidenceLooksFragmentary(line) {
+    const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(line)));
+    const words = clean.split(' ').filter(Boolean);
+    return (!clean ||
+        words.length < 5 ||
+        /(?:^not like\b|^on [A-Z][a-z]+\b|^through\b)/i.test(clean) ||
+        /\b(?:img|heic|transcribed journal page)\b/i.test(clean) ||
+        DANGLING_ENDING_PATTERN.test(clean));
+}
+function scoreEvidenceLine(line, family) {
+    const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(line)));
+    if (!clean || !family.test.test(clean) || evidenceLooksFragmentary(clean))
+        return -1;
+    let score = 0;
+    const wordCount = clean.split(' ').filter(Boolean).length;
+    if (wordCount >= 8 && wordCount <= 32)
+        score += 3;
+    if (wordCount < 6)
+        score -= 4;
+    if (/[.!?]$/.test(clean))
+        score += 2;
+    else
+        score -= 1;
+    if (/^(what|why|how)\b/i.test(clean))
+        score -= 1;
+    if (/\b(i want|i needed|i feel|the pattern|not asking|reaching out|self authorization|external validation|surrender)\b/i.test(clean)) {
+        score += 2;
+    }
+    if (/\b(?:through authentic alignment|same pattern|same idea)\b/i.test(clean))
+        score -= 4;
+    return score;
+}
+function bestFamilyEvidenceLine(sourceLines, family) {
+    return sourceLines
+        .map((line) => ({
+        line: cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))),
+        score: scoreEvidenceLine(line, family),
+    }))
+        .filter((item) => item.line && item.score >= 2)
+        .sort((left, right) => right.score - left.score || right.line.length - left.line.length)[0]?.line ?? '';
 }
 function semanticToken(token) {
     if (!token)
@@ -977,15 +1019,15 @@ function chooseBestClusterTitle(cluster) {
     return simplifyPatternTitle(rankedTitles[0] ?? 'Recurring thread');
 }
 function buildOverviewFromCluster(title, entryCount, evidence) {
-    const lead = cleanTruncatedEnding(evidence[0] ?? '');
-    const second = cleanTruncatedEnding(evidence.find((item, index) => index > 0 && semanticSimilarity(item, lead) < 0.42) ?? '');
-    const titleStem = normalizePatternTitle(title).split(' ')[0] ?? '';
-    const titleLead = lead && titleStem && !normalizePatternTitle(lead).includes(titleStem) ? `${title}: ${lead}` : lead;
-    if (entryCount >= 2) {
-        const parts = [titleLead, second && semanticSimilarity(second, lead) < 0.42 ? second : ''].filter(Boolean);
-        return cleanTruncatedEnding(parts.join(' '));
-    }
-    return cleanTruncatedEnding(titleLead || title);
+    const cleanEvidence = evidence
+        .map((item) => cleanTruncatedEnding(item))
+        .filter((item) => item && !evidenceLooksFragmentary(item));
+    const lead = cleanEvidence[0] ?? '';
+    const second = cleanEvidence.find((item, index) => index > 0 && semanticSimilarity(item, lead) < 0.42) ?? '';
+    const parts = [lead, entryCount >= 2 ? second : '']
+        .filter(Boolean)
+        .map((item) => (/[.!?]$/.test(item) ? item : `${item}.`));
+    return cleanTruncatedEnding(parts.join(' ')) || title;
 }
 function themeTokenSet(title) {
     return new Set(normalizePatternTitle(title)
@@ -1010,44 +1052,30 @@ function buildLocalThemeCandidates(entries) {
     for (const entry of entries) {
         const sourceLines = [
             ...splitIntoCandidateSentences(entry.rawText),
-            ...buildSourceMoments(entry.rawText, 8),
             entry.summary,
         ]
             .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
             .filter(Boolean);
         const familyCandidates = THEME_FAMILIES.flatMap((family) => {
-            const evidence = sourceLines.find((line) => family.test.test(line));
+            const evidence = bestFamilyEvidenceLine(sourceLines, family);
             if (!evidence)
                 return [];
             return [{
                     title: family.title,
-                    evidence: firstSentence(evidence, 180) || evidence,
+                    evidence,
                     weight: 6,
                 }];
         });
         const sectionCandidates = entry.analysis?.sections
             ?.filter((section) => !isGenericSectionTitle(section.title))
-            .map((section) => ({
-            title: simplifyPatternTitle(section.title),
-            evidence: firstSentence(section.content, 160) || cleanTruncatedEnding(entry.summary),
-            weight: 3,
-        })) ?? [];
-        const signalCandidates = entry.analysis?.patternSignals?.map((signal) => ({
-            title: simplifyPatternTitle(signal),
-            evidence: cleanTruncatedEnding(entry.summary),
-            weight: 4,
-        })) ?? [];
-        const digestCandidates = entry.analysis?.entryDigest
-            ?.filter((item) => item.includes(':'))
-            .map((item) => {
-            const [title, ...rest] = item.split(':');
-            return {
-                title: simplifyPatternTitle(title),
-                evidence: cleanTruncatedEnding(rest.join(':').trim() || entry.summary),
-                weight: 2,
-            };
+            .flatMap((section) => {
+            const title = simplifyPatternTitle(section.title);
+            const evidence = bestFamilyEvidenceLine(splitIntoCandidateSentences(section.content), themeFamilyForText(title) ?? { key: '', title, test: /$^/, questions: [] });
+            if (!title || !evidence || evidenceLooksFragmentary(evidence))
+                return [];
+            return [{ title, evidence, weight: 3 }];
         }) ?? [];
-        const combined = [...familyCandidates, ...signalCandidates, ...sectionCandidates, ...digestCandidates]
+        const combined = [...familyCandidates, ...sectionCandidates]
             .filter((candidate) => candidate.title && candidate.evidence)
             .filter((candidate) => themeCandidateIsSelfConsistent(candidate.title, candidate.evidence))
             .sort((left, right) => right.weight - left.weight)
@@ -1143,12 +1171,17 @@ function buildPatternClusters(entries) {
             .flatMap(([entryId, evidenceItems]) => evidenceItems
             .sort((left, right) => right.weight - left.weight)
             .slice(0, 2)
-            .map((item) => ({
-            entryId,
-            entryTitle: entryTitleById.get(entryId) ?? 'Untitled entry',
-            evidence: cleanTruncatedEnding(item.evidence),
-            weight: item.weight,
-        })))
+            .flatMap((item) => {
+            const evidence = cleanTruncatedEnding(item.evidence);
+            if (evidenceLooksFragmentary(evidence))
+                return [];
+            return [{
+                    entryId,
+                    entryTitle: entryTitleById.get(entryId) ?? 'Untitled entry',
+                    evidence,
+                    weight: item.weight,
+                }];
+        }))
             .sort((left, right) => right.weight - left.weight);
         return {
             clusterId: `cluster-${index + 1}`,
