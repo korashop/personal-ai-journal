@@ -1543,7 +1543,7 @@ function buildDeterministicPatterns(entries, previousPatterns) {
 function patternsLookWeak(patterns, entriesCount) {
     if (!patterns.length)
         return true;
-    if (entriesCount >= 10 && patterns.length <= 3)
+    if (entriesCount >= 10 && patterns.length <= 4)
         return true;
     const singletonCount = patterns.filter((pattern) => pattern.entryCount <= 1).length;
     if (patterns.length >= 5 && singletonCount / patterns.length >= 0.6)
@@ -1601,12 +1601,9 @@ function stripPatternIdentity(pattern) {
     };
 }
 function patternsReferToSameTheme(left, right) {
-    const sharedEntryCount = left.entryIds.filter((id) => right.entryIds.includes(id)).length;
-    const entryOverlap = sharedEntryCount / Math.max(left.entryIds.length, right.entryIds.length, 1);
     return (normalizePatternTitle(left.title) === normalizePatternTitle(right.title) ||
         themeTitleSimilarity(left.title, right.title) >= 0.62 ||
-        semanticSimilarity(`${left.title} ${left.overview}`, `${right.title} ${right.overview}`) >= 0.72 ||
-        (entryOverlap >= 0.6 && semanticSimilarity(left.overview, right.overview) >= 0.3));
+        semanticSimilarity(`${left.title} ${left.overview}`, `${right.title} ${right.overview}`) >= 0.72);
 }
 function mergeEnrichedWithFallbackPatterns(enrichedPatterns, fallbackPatterns) {
     const merged = [...enrichedPatterns];

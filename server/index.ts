@@ -121,7 +121,7 @@ function shouldRefreshPatterns(
   patterns: Array<{ overview: string; dimensions: string[]; questions: string[]; status?: string; entryCount?: number; title?: string }>,
 ) {
   if (!patterns.length) return true
-  if (entriesCount >= 10 && patterns.length <= 3) return true
+  if (entriesCount >= 10 && patterns.length <= 4) return true
   const singletonCount = patterns.filter((pattern) => (pattern.entryCount ?? 0) <= 1).length
   if (patterns.length >= 5 && singletonCount / patterns.length >= 0.6) return true
   if (patterns.length >= 4 && patterns.every((pattern) => pattern.status === 'emerging')) return true
