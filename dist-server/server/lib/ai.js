@@ -297,6 +297,7 @@ function isGenericSectionTitle(title) {
         'main',
         'under surface',
         'under-surface',
+        'the lab',
     ].includes(normalized);
 }
 function firstSentence(text, maxLength = 140) {
@@ -664,6 +665,10 @@ export async function rewriteMemoryDoc(currentMemory, recentEntries) {
         .join('\n');
     const prompt = `Update this memory document so future analysis can use cumulative context.
 Keep it grounded in the user's actual writing. Avoid inflated abstractions.
+Treat the memory as a living map, not a task tracker.
+In ## Open Threads, keep only threads that still look genuinely active across the recent journal or clearly recur from current memory into the latest entries.
+Drop one-off action reminders, specific outreach drafts, or stale named to-dos unless they clearly represent a broader recurring mechanism that is still present now.
+Phrase open threads as durable tensions or live questions, not as literal chores to complete.
 Return markdown only using exactly these sections:
 ## Open Threads
 ## Recurring Themes
@@ -942,6 +947,18 @@ function themeCandidateIsSelfConsistent(title, evidence) {
         return true;
     const evidenceFamily = themeFamilyForText(evidence);
     return evidenceFamily?.key === titleFamily.key;
+}
+function uncategorizedThemeTitleLooksTooGeneric(title) {
+    const cleaned = simplifyPatternTitle(title);
+    const normalized = normalizePatternTitle(cleaned);
+    const tokens = normalized
+        .split(' ')
+        .filter(Boolean)
+        .filter((token) => !['the', 'and', 'with', 'from', 'into', 'your', 'that', 'this', 'about', 'how'].includes(token));
+    return (!cleaned ||
+        tokens.length <= 1 ||
+        /^(?:the )?(?:lab|exercise|prompt|notes?|practice|reflection|draft|sketch|idea|question|experiment)$/i.test(cleaned) ||
+        /^(?:the )?(?:lab|exercise|prompt|notes?|practice|reflection|draft|sketch|idea|question|experiment)\b/i.test(cleaned));
 }
 function evidenceLooksFragmentary(line) {
     const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(line)));
@@ -1418,6 +1435,8 @@ function buildLocalThemeCandidates(entries) {
             .flatMap((section) => {
             const title = simplifyPatternTitle(section.title);
             const titleFamily = themeFamilyForText(title);
+            if (!titleFamily && uncategorizedThemeTitleLooksTooGeneric(title))
+                return [];
             const sectionLines = splitIntoCandidateSentences(section.content);
             const evidence = titleFamily
                 ? bestFamilyEvidenceLine(sectionLines, titleFamily)
