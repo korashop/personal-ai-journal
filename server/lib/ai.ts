@@ -1444,7 +1444,7 @@ function patternHasEnoughThemeEvidence(
   pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>,
 ) {
   if (!pattern.entryIds.length || !pattern.dimensions.length) return false
-  if (pattern.entryIds.length >= 2 && pattern.dimensions.length < 2) return false
+  if (pattern.entryIds.length >= 3 && pattern.dimensions.length < 2) return false
   if (pattern.dimensions.some((line) => evidenceLooksFragmentary(line))) return false
   return true
 }
@@ -1731,7 +1731,7 @@ function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
     ),
   ).length
   if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6) return true
-  if (patterns.some((pattern) => pattern.entryCount >= 2 && pattern.dimensions.length < 2)) return true
+  if (patterns.some((pattern) => pattern.entryCount >= 3 && pattern.dimensions.length < 2)) return true
   return patterns.some((pattern) =>
     /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
     looksTruncatedPatternText(pattern.title) ||

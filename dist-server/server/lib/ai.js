@@ -1199,7 +1199,7 @@ function buildClusterDimensionLines(cluster) {
 function patternHasEnoughThemeEvidence(pattern) {
     if (!pattern.entryIds.length || !pattern.dimensions.length)
         return false;
-    if (pattern.entryIds.length >= 2 && pattern.dimensions.length < 2)
+    if (pattern.entryIds.length >= 3 && pattern.dimensions.length < 2)
         return false;
     if (pattern.dimensions.some((line) => evidenceLooksFragmentary(line)))
         return false;
@@ -1445,7 +1445,7 @@ function patternsLookWeak(patterns, entriesCount) {
     const genericQuestionCount = patterns.filter((pattern) => pattern.questions.every((question) => /what keeps this theme in place right now|what concrete move would test a different way of operating here/i.test(question))).length;
     if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6)
         return true;
-    if (patterns.some((pattern) => pattern.entryCount >= 2 && pattern.dimensions.length < 2))
+    if (patterns.some((pattern) => pattern.entryCount >= 3 && pattern.dimensions.length < 2))
         return true;
     return patterns.some((pattern) => /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
         looksTruncatedPatternText(pattern.title) ||

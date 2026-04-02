@@ -99,7 +99,7 @@ function shouldRefreshPatterns(entriesCount, patterns) {
     const genericQuestionCount = patterns.filter((pattern) => pattern.questions.every((question) => /what keeps this theme in place right now|what concrete move would test a different way of operating here/i.test(question))).length;
     if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6)
         return true;
-    if (patterns.some((pattern) => (pattern.entryCount ?? 0) >= 2 && pattern.dimensions.length < 2))
+    if (patterns.some((pattern) => (pattern.entryCount ?? 0) >= 3 && pattern.dimensions.length < 2))
         return true;
     const looksBrokenCopy = (text) => {
         const clean = text.trim();
