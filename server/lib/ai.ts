@@ -54,21 +54,27 @@ function clipLongEntryForAnalysis(text: string, maxLength = 8000) {
     return clipForPrompt(cleaned, maxLength)
   }
 
-  const firstChunk = paragraphs.slice(0, 10).join('\n')
-  const middleStart = Math.max(Math.floor(paragraphs.length / 2) - 4, 0)
-  const middleChunk = paragraphs.slice(middleStart, middleStart + 8).join('\n')
-  const lastChunk = paragraphs.slice(-10).join('\n')
+  const segmentCount = Math.min(Math.max(Math.ceil(paragraphs.length / 8), 4), 7)
+  const segments: string[] = []
+  const budgetPerSegment = Math.max(Math.floor(maxLength / segmentCount) - 40, 220)
 
-  return [
-    '[Beginning]',
-    clipForPrompt(firstChunk, Math.floor(maxLength * 0.36)),
-    '',
-    '[Middle]',
-    clipForPrompt(middleChunk, Math.floor(maxLength * 0.24)),
-    '',
-    '[End]',
-    clipForPrompt(lastChunk, Math.floor(maxLength * 0.36)),
-  ].join('\n')
+  for (let index = 0; index < segmentCount; index += 1) {
+    const center = segmentCount === 1 ? 0 : Math.round((index / (segmentCount - 1)) * (paragraphs.length - 1))
+    const start = Math.max(center - 2, 0)
+    const segmentParagraphs = paragraphs.slice(start, Math.min(start + 4, paragraphs.length))
+    const label =
+      index === 0
+        ? '[Beginning]'
+        : index === segmentCount - 1
+          ? '[End]'
+          : `[Section ${index + 1}]`
+
+    segments.push(label)
+    segments.push(clipForPrompt(segmentParagraphs.join('\n'), budgetPerSegment))
+    segments.push('')
+  }
+
+  return segments.join('\n').trim()
 }
 
 function slugify(text: string) {
@@ -229,11 +235,15 @@ function buildEntryDigest(rawText: string) {
     return cleaned.slice(0, 5).map((line) => clip(line, 140))
   }
 
-  const picks = [
-    ...cleaned.slice(0, 2),
-    cleaned[Math.floor(cleaned.length / 2)],
-    ...cleaned.slice(-2),
-  ].filter(Boolean)
+  const picks: string[] = []
+  const targetCount = Math.min(6, cleaned.length)
+  for (let index = 0; index < targetCount; index += 1) {
+    const position = Math.round((index / Math.max(targetCount - 1, 1)) * (cleaned.length - 1))
+    const line = cleaned[position]
+    if (line) {
+      picks.push(line)
+    }
+  }
 
   const deduped: string[] = []
   for (const line of picks) {
@@ -378,8 +388,11 @@ Return JSON only with this shape:
 Rules:
 - Separate distinct threads when they are not actually one thing.
 - Keep entryDigest concrete and source-grounded.
+- Mention real names, projects, and decisions when they materially appear.
 - Use short paragraphs and bullets when useful.
+- Do not end sections with ellipses or fragments.
 - Do not use generic headings like Overview unless truly necessary.
+- Account for the full spread of the entry, not just the beginning.
 
 Entry:
 ${clipLongEntryForAnalysis(rawText, 7000)}`
@@ -550,6 +563,31 @@ function fallbackAnalysis(rawText: string, tags: string[]): AnalysisPayload {
   }
 }
 
+function analysisLooksThin(
+  candidate: {
+    summary?: string
+    entryDigest?: string[]
+    sections: Array<{ content: string }>
+    contextBullets?: string[]
+  },
+  rawText: string,
+) {
+  const totalSectionLength = candidate.sections.reduce((sum, section) => sum + section.content.length, 0)
+  const longEntry = rawText.length > 7000
+  const hasTruncation = candidate.sections.some((section) => /\.{3,}\s*$/.test(section.content.trim()))
+  const digestCount = (candidate.entryDigest ?? []).filter(Boolean).length
+  const contextCount = (candidate.contextBullets ?? []).filter(Boolean).length
+
+  if (hasTruncation) return true
+  if (!candidate.summary?.trim()) return true
+  if (digestCount < 3) return true
+  if (longEntry && totalSectionLength < 900) return true
+  if (longEntry && contextCount < 2) return true
+  if (!longEntry && totalSectionLength < 280) return true
+
+  return false
+}
+
 async function repairAnalysisJson(
   malformedResponse: string,
   rawText: string,
@@ -705,21 +743,17 @@ ${analysisEntryText}`
     .map((item) => item.text)
     .join('\n')
 
-  try {
-    const parsed = parseJsonFromText<{
-      title?: string
-      summary?: string
-      entryDigest?: string[]
-      contextBullets?: string[]
-      sections?: Array<{ title?: string; content?: string }>
-      exploreOptions?: string[]
-      feedLabels?: string[]
-    }>(text)
+  const parsed = parseJsonFromText<{
+    title?: string
+    summary?: string
+    entryDigest?: string[]
+    contextBullets?: string[]
+    sections?: Array<{ title?: string; content?: string }>
+    exploreOptions?: string[]
+    feedLabels?: string[]
+  }>(text)
 
-    if (!parsed) {
-      return fallbackAnalysis(cleanedRaw, tags)
-    }
-
+  if (parsed) {
     const sections = (parsed.sections ?? [])
       .filter((section) => section.title && section.content)
       .map((section, index) => ({
@@ -728,27 +762,28 @@ ${analysisEntryText}`
         content: section.content!.trim(),
       }))
 
-    if (!sections.length) {
-      return fallbackAnalysis(cleanedRaw, tags)
-    }
+    if (sections.length && !analysisLooksThin({ ...parsed, sections }, cleanedRaw)) {
+      const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3)
 
-    const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3)
-
-    return {
-      title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), cleanedRaw, tags),
-      summary: deriveDisplaySummary(parsed.summary?.trim(), cleanedRaw),
-      entryDigest: finalizeEntryDigest(parsed.entryDigest, cleanedRaw),
-      contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
-      sections,
-      exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
-      feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, cleanedRaw, sections),
+      return {
+        title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), cleanedRaw, tags),
+        summary: deriveDisplaySummary(parsed.summary?.trim(), cleanedRaw),
+        entryDigest: finalizeEntryDigest(parsed.entryDigest, cleanedRaw),
+        contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
+        sections,
+        exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+        feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, cleanedRaw, sections),
+      }
     }
-  } catch {
-    const repaired = await repairAnalysisJson(text, cleanedRaw, tags)
-    if (repaired) return repaired
-    const retried = await retryAnalysisWithTighterPrompt(cleanedRaw, tags)
-    return retried ?? fallbackAnalysis(cleanedRaw, tags)
   }
+
+  const repaired = await repairAnalysisJson(text, cleanedRaw, tags)
+  if (repaired && !analysisLooksThin(repaired, cleanedRaw)) return repaired
+
+  const retried = await retryAnalysisWithTighterPrompt(cleanedRaw, tags)
+  if (retried && !analysisLooksThin(retried, cleanedRaw)) return retried
+
+  return fallbackAnalysis(cleanedRaw, tags)
 }
 
 export async function rewriteMemoryDoc(
@@ -926,6 +961,144 @@ function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'up
   return merged
 }
 
+function patternCoverageRatio(
+  patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>,
+  entries: JournalEntry[],
+) {
+  if (!entries.length) return 0
+  const coveredIds = new Set(patterns.flatMap((pattern) => pattern.entryIds))
+  return coveredIds.size / entries.length
+}
+
+function looksTruncatedPatternText(text: string) {
+  return /\.{3,}\s*$/.test(text.trim())
+}
+
+function shouldForcePatternExpansion(
+  patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>,
+  entries: JournalEntry[],
+) {
+  if (!entries.length) return false
+  if (entries.length >= 10 && patterns.length <= 3) return true
+  if (entries.length >= 12 && patternCoverageRatio(patterns, entries) < 0.72) return true
+
+  return patterns.some((pattern) =>
+    looksTruncatedPatternText(pattern.overview) ||
+    pattern.dimensions.some(looksTruncatedPatternText) ||
+    pattern.questions.some(looksTruncatedPatternText),
+  )
+}
+
+async function synthesizePatternsWithModel(
+  memoryDoc: MemoryDocumentRecord | null,
+  recentEntries: JournalEntry[],
+  previousPatterns: PatternSection[],
+  options?: { expandAggressively?: boolean },
+): Promise<{
+  patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>
+  rawText: string
+} | null> {
+  if (!anthropic || !recentEntries.length) return null
+
+  const continuityPatterns =
+    options?.expandAggressively && previousPatterns.length <= 3 && recentEntries.length >= 10
+      ? []
+      : previousPatterns
+
+  const prompt = `Build a set of clickable theme threads from this journal history.
+Return JSON only:
+[
+  {
+    "title": "theme title",
+    "overview": "state of affairs: the mechanism, why it matters now, and what seems true at this moment",
+    "dimensions": ["distinct way the theme shows up", "distinct way the theme shows up"],
+    "questions": ["useful unresolved question"],
+    "exploreOptions": ["one way to engage this theme"],
+    "entryIds": ["entry id"]
+  }
+]
+
+Rules:
+- Return the real set of important themes. Do not target a number for its own sake.
+- For 10+ entries, prefer a richer map. Usually 5 to 9 themes is better than 2 or 3 giant umbrellas if the material supports it.
+- If there are 13+ entries and the material clearly supports it, returning only 2 or 3 themes is usually too collapsed.
+- Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
+- Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
+- Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
+- Preserve continuity in major themes when still active, but do not keep stale collapsed umbrellas just because they already exist.
+- Create a theme when it seems genuinely important, durable, or central to the user's thinking, even if it is newly emerging.
+- Do not inflate the list with weak themes just to have more themes.
+- Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
+- If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
+- It is okay to include smaller, more specific emerging themes if they reveal an important live thread.
+- The same entry can support multiple themes. Shared supporting entries are allowed when distinct mechanisms are present.
+- Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
+- Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
+- Themes can vary in depth.
+- Use only entry IDs that are provided below.
+- Do not just repeat entry text. Synthesize.
+- Prefer psychological or decision-making patterns over broad topic tags.
+- If a broad domain like work appears, refine it into the actual thread inside the writing.
+- Prefer more granularity when a single broad theme hides multiple different mechanisms.
+- The overview, dimensions, and questions must do different jobs:
+  - overview = the mechanism and why it matters now
+  - dimensions = observable ways this pattern shows up, concrete tensions, or recurring situations
+  - questions = genuinely open lines of inquiry that are not already implied by the overview
+- Do not repeat the same sentence or paraphrase across overview, dimensions, and questions.
+- Do not just restate one recent entry in all three places.
+- If a line belongs in overview, do not repeat it in dimensions.
+- If a line is already an observation, do not rewrite it as a fake question.
+- Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
+- Use the full spread of entries below. Do not anchor only on the dominant repeated theme if other meaningful threads are present.
+- Treat entry digests and section titles as evidence of distinct subthreads. Use them to split apart different live mechanisms instead of over-collapsing.
+${options?.expandAggressively ? '- The current map is too collapsed. Replace stale umbrella themes with a fuller map if the evidence supports it.' : ''}
+
+Memory:
+${memoryForPrompt(memoryDoc, options?.expandAggressively ? 1400 : 1800)}
+
+Entries:
+${patternEntriesForPrompt(recentEntries, 18)}
+
+Existing themes to preserve when still active:
+${previousPatternsForPrompt(continuityPatterns)}`
+
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel,
+    max_tokens: options?.expandAggressively ? 2100 : 1800,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = response.content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+
+  const parsed = parseJsonFromText<
+    Array<{
+      title?: string
+      overview?: string
+      dimensions?: string[]
+      questions?: string[]
+      exploreOptions?: string[]
+      entryIds?: string[]
+    }>
+  >(text)
+
+  return {
+    rawText: text,
+    patterns: (parsed ?? [])
+      .filter((item) => item.title && item.overview)
+      .map((item) => ({
+      title: simplifyPatternTitle(item.title!.trim()),
+      overview: item.overview!.trim(),
+      dimensions: (item.dimensions ?? []).map((signal) => signal.trim()).filter(Boolean),
+      questions: (item.questions ?? []).map((question) => question.trim()).filter(Boolean),
+      exploreOptions: (item.exploreOptions ?? []).map((option) => option.trim()).filter(Boolean).slice(0, 4),
+      entryIds: (item.entryIds ?? []).filter(Boolean),
+      })),
+  }
+}
+
 function reconcilePatterns(
   previousPatterns: PatternSection[],
   nextPatterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>,
@@ -1006,103 +1179,24 @@ export async function buildPatterns(
   }))
 
   if (anthropic && entries.length) {
-    const prompt = `Build a set of clickable theme threads from this journal history.
-Return JSON only:
-[
-  {
-    "title": "theme title",
-    "overview": "state of affairs: the mechanism, why it matters now, and what seems true at this moment",
-    "dimensions": ["distinct way the theme shows up", "distinct way the theme shows up"],
-    "questions": ["useful unresolved question"],
-    "exploreOptions": ["one way to engage this theme"],
-    "entryIds": ["entry id"]
-  }
-]
-
-Rules:
-- Return the real set of important themes. Do not target a number for its own sake.
-- For 10+ entries, prefer a richer map. Usually 5 to 9 themes is better than 2 or 3 giant umbrellas if the material supports it.
-- If there are 13+ entries and the material clearly supports it, returning only 2 or 3 themes is usually too collapsed.
-- Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
-- Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
-- Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
-- Preserve continuity in major themes. If an existing theme is still active, prefer refining it rather than inventing a brand new title.
-- Create a theme when it seems genuinely important, durable, or central to the user's thinking, even if it is newly emerging.
-- Do not inflate the list with weak themes just to have more themes.
-- Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
-- If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
-- It is okay to include smaller, more specific emerging themes if they reveal an important live thread.
-- The same entry can support multiple themes. Shared supporting entries are allowed when distinct mechanisms are present.
-- Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
-- Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
-- Themes can vary in depth.
-- Use only entry IDs that are provided below.
-- Do not just repeat entry text. Synthesize.
-- Prefer psychological or decision-making patterns over broad topic tags.
-- If a broad domain like work appears, refine it into the actual thread inside the writing.
-- Prefer more granularity when a single broad theme hides multiple different mechanisms.
-- The overview, dimensions, and questions must do different jobs:
-  - overview = the mechanism and why it matters now
-  - dimensions = observable ways this pattern shows up, concrete tensions, or recurring situations
-  - questions = genuinely open lines of inquiry that are not already implied by the overview
-- Do not repeat the same sentence or paraphrase across overview, dimensions, and questions.
-- Do not just restate one recent entry in all three places.
-- If a line belongs in overview, do not repeat it in dimensions.
-- If a line is already an observation, do not rewrite it as a fake question.
-- Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
-- Use the full spread of entries below. Do not anchor only on the dominant repeated theme if other meaningful threads are present.
-- Treat entry digests and section titles as evidence of distinct subthreads. Use them to split apart different live mechanisms instead of over-collapsing.
-
-Memory:
-${memoryForPrompt(memoryDoc, 1800)}
-
-Entries:
-${patternEntriesForPrompt(recentEntries, 18)}
-
-Existing themes to preserve when still active:
-${previousPatternsForPrompt(previousPatterns)}
-`
-
-    const response = await anthropic.messages.create({
-      model: config.anthropicModel,
-      max_tokens: 1800,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    const text = response.content
-      .filter((item) => item.type === 'text')
-      .map((item) => item.text)
-      .join('\n')
-
+    let rawPatternText = ''
     try {
-      const parsed = parseJsonFromText<
-        Array<{
-          title?: string
-          overview?: string
-          dimensions?: string[]
-          questions?: string[]
-          exploreOptions?: string[]
-          entryIds?: string[]
-        }>
-      >(text)
+      const synthesized = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns)
+      rawPatternText = synthesized?.rawText ?? ''
 
-      if (!parsed) {
-        throw new Error('Could not parse theme JSON')
-      }
+      if (synthesized?.patterns.length) {
+        let paddedPatterns = dedupeAndRefinePatterns(synthesized.patterns)
 
-      const patterns = parsed
-        .filter((item) => item.title && item.overview)
-        .map((item) => ({
-          title: simplifyPatternTitle(item.title!.trim()),
-          overview: item.overview!.trim(),
-          dimensions: (item.dimensions ?? []).map((signal) => signal.trim()).filter(Boolean),
-          questions: (item.questions ?? []).map((question) => question.trim()).filter(Boolean),
-          exploreOptions: (item.exploreOptions ?? []).map((option) => option.trim()).filter(Boolean).slice(0, 4),
-          entryIds: (item.entryIds ?? []).filter(Boolean),
-        }))
+        if (shouldForcePatternExpansion(paddedPatterns, recentEntries)) {
+          const expanded = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, {
+            expandAggressively: true,
+          }).catch(() => null)
 
-      if (patterns.length) {
-        const paddedPatterns = dedupeAndRefinePatterns(patterns)
+          if (expanded?.patterns.length) {
+            rawPatternText = expanded.rawText
+            paddedPatterns = dedupeAndRefinePatterns(expanded.patterns)
+          }
+        }
 
         for (const heuristicPattern of heuristicPatterns) {
           const overlapsExisting = paddedPatterns.some(
@@ -1111,7 +1205,7 @@ ${previousPatternsForPrompt(previousPatterns)}
               heuristicPattern.entryIds.some((entryId) => pattern.entryIds.includes(entryId)),
           )
 
-          if (!overlapsExisting && paddedPatterns.length < 5) {
+          if (!overlapsExisting && paddedPatterns.length < 6) {
             paddedPatterns.push(heuristicPattern)
           }
         }
@@ -1125,8 +1219,12 @@ ${previousPatternsForPrompt(previousPatterns)}
           })
           .slice(0, 9)
       }
+
+      if (rawPatternText) {
+        throw new Error('Pattern synthesis returned no usable themes')
+      }
     } catch {
-      const repaired = await repairPatternJson(text, memoryDoc, recentEntries, previousPatterns).catch(() => null)
+      const repaired = await repairPatternJson(rawPatternText, memoryDoc, recentEntries, previousPatterns).catch(() => null)
       if (repaired?.length) {
         const paddedPatterns = dedupeAndRefinePatterns(repaired)
         const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))

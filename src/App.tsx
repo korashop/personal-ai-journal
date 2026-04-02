@@ -226,8 +226,10 @@ export default function App() {
                 entries={entries}
                 mode={selectedEntryId ? 'detail' : 'list'}
                 onSelect={(entryId) => {
+                  setError(null)
                   setSelectedEntryId(entryId)
                   setSelectedEntry(null)
+                  void loadBootstrap(entryId)
                 }}
                 selectedEntryId={selectedEntryId}
               />
@@ -253,9 +255,11 @@ export default function App() {
               entries={entries}
               memoryDoc={bootstrap.memoryDoc}
               onOpenEntry={(entryId) => {
+                setError(null)
                 setSelectedEntryId(entryId)
                 setSelectedEntry(null)
                 setView('entries')
+                void loadBootstrap(entryId)
               }}
               onRefreshAfterThemeReply={async () => {
                 await loadBootstrap(null, { preserveSelection: true })

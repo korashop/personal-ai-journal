@@ -24,7 +24,24 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 function shouldRetry(response: Response) {
-  return response.status >= 500
+  return response.status >= 500 || response.status === 429
+}
+
+async function fetchWithRetry(input: string, init?: RequestInit, attempts = 3) {
+  let lastResponse: Response | null = null
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await fetch(input, init)
+    lastResponse = response
+
+    if (!shouldRetry(response) || attempt === attempts - 1) {
+      return response
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 450 * (attempt + 1)))
+  }
+
+  return lastResponse as Response
 }
 
 export async function fetchBootstrap(entryId?: string | null): Promise<JournalBootstrap> {
@@ -33,17 +50,13 @@ export async function fetchBootstrap(entryId?: string | null): Promise<JournalBo
     params.set('entryId', entryId)
   }
   const query = params.size ? `?${params.toString()}` : ''
-  const response = await fetch(apiUrl(`/api/bootstrap${query}`))
+  const response = await fetchWithRetry(apiUrl(`/api/bootstrap${query}`))
   return parseResponse<JournalBootstrap>(response)
 }
 
 export async function fetchEntry(entryId: string): Promise<EntryRecord> {
   const url = apiUrl(`/api/entries/${encodeURIComponent(entryId)}`)
-  let response = await fetch(url)
-  if (shouldRetry(response)) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500))
-    response = await fetch(url)
-  }
+  const response = await fetchWithRetry(url)
   return parseResponse<EntryRecord>(response)
 }
 

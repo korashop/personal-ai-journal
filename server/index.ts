@@ -29,6 +29,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const frontendDistPath = join(__dirname, '../dist')
 const patternRefreshInFlight = new Set<string>()
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function looksTransientError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+  return ['bad gateway', 'gateway', 'timeout', 'timed out', 'fetch failed', 'network', 'temporarily unavailable'].some((token) =>
+    message.includes(token),
+  )
+}
+
+async function withTransientRetry<T>(task: () => Promise<T>, attempts = 3) {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await task()
+    } catch (error) {
+      lastError = error
+      if (attempt === attempts - 1 || !looksTransientError(error)) {
+        throw error
+      }
+      await sleep(250 * (attempt + 1))
+    }
+  }
+
+  throw lastError
+}
+
 app.use(cors())
 app.use(express.json({ limit: '4mb' }))
 
@@ -147,7 +176,7 @@ app.get('/api/bootstrap', async (request, response, next) => {
     const { mode, store } = getStore()
     const selectedEntryId = typeof request.query.entryId === 'string' ? request.query.entryId : null
     const userId = config.demoUserId
-    const data = await store.getBootstrap(userId, selectedEntryId)
+    const data = await withTransientRetry(() => store.getBootstrap(userId, selectedEntryId))
     const needsPatternRefresh = shouldRefreshPatterns(data.patternEntries.length, data.patterns)
     const patterns =
       !data.patterns.length
@@ -384,7 +413,7 @@ app.get('/api/entries/:entryId', async (request, response, next) => {
   try {
     const userId = typeof request.query.userId === 'string' ? request.query.userId : config.demoUserId
     const { store } = getStore()
-    const entry = await store.getEntryView(request.params.entryId, userId)
+    const entry = await withTransientRetry(() => store.getEntryView(request.params.entryId, userId))
     response.json(entry)
   } catch (error) {
     next(error)

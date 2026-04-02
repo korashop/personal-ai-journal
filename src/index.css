@@ -752,17 +752,9 @@ button {
   font-size: 0.92rem;
 }
 
-.pattern-home-card span {
-  line-height: 1.55;
-}
-
 .pattern-nav-title {
   margin-bottom: 0;
   line-height: 1.35;
-}
-
-.pattern-focus h2 {
-  max-width: 18ch;
 }
 
 .pattern-detail-meta {
@@ -1128,6 +1120,23 @@ button {
 .pattern-home-card strong {
   font-size: 1.08rem;
   line-height: 1.25;
+}
+
+.pattern-home-preview {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.pattern-home-signals {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.pattern-home-signals li {
+  margin-bottom: 0.32rem;
 }
 
 .pattern-home-meta,

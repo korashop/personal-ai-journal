@@ -6,10 +6,6 @@ import type { FormEvent } from 'react'
 import { createPatternReply } from '../lib/api'
 import type { EntryListItem, MemoryDocument, PatternSection } from '../types'
 
-function clip(text: string, maxLength = 180) {
-  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text
-}
-
 function statusLabel(status: PatternSection['status']) {
   if (status === 'deepening') return 'Deepening'
   if (status === 'emerging') return 'Emerging'
@@ -256,7 +252,14 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                     <strong>{pattern.title}</strong>
                     <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
                   </div>
-                  <span>{clip(pattern.overview, 190)}</span>
+                  <p className="pattern-home-preview">{pattern.overview}</p>
+                  {pattern.dimensions.length ? (
+                    <ul className="pattern-home-signals">
+                      {pattern.dimensions.slice(0, 2).map((dimension) => (
+                        <li key={dimension}>{dimension}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                   <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                 </button>
               ))}
@@ -336,6 +339,15 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                   <button className="related-entry-card" key={entry.id} onClick={() => onOpenEntry(entry.id)} type="button">
                     <strong>{entry.title}</strong>
                     <span>{entry.summary}</span>
+                    {entry.feedLabels.length ? (
+                      <div className="entry-bullets compact">
+                        {entry.feedLabels.slice(0, 3).map((label) => (
+                          <span className="bullet-pill" key={`${entry.id}-${label}`}>
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </button>
                 ))}
               </div>
