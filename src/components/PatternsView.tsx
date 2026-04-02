@@ -28,6 +28,13 @@ function prominenceLabel(pattern: PatternSection, index: number) {
   return 'Active thread'
 }
 
+function patternLooksPlaceholder(pattern: PatternSection) {
+  return (
+    /\bis present in this entry, but the underlying shape is still emerging\b/i.test(pattern.overview) ||
+    /\bkeeps recurring across \d+ entries, but the underlying shape is still emerging\b/i.test(pattern.overview)
+  )
+}
+
 function normalizeForComparison(text: string) {
   return text
     .toLowerCase()
@@ -117,7 +124,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   }, [selectedPatternId])
 
   useEffect(() => {
-    if (patterns.length > 5 || entries.length < 10) {
+    if ((patterns.length > 5 && !patterns.some(patternLooksPlaceholder)) || entries.length < 10) {
       setStaleSyncAttempts(0)
       return
     }
@@ -131,7 +138,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [entries.length, onRefreshAfterThemeReply, patterns.length, staleSyncAttempts])
+  }, [entries.length, onRefreshAfterThemeReply, patterns, staleSyncAttempts])
 
   const selectedPattern = useMemo(
     () => (selectedPatternId ? patterns.find((pattern) => pattern.id === selectedPatternId) ?? null : null),

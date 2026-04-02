@@ -903,6 +903,29 @@ function themeFamilyForText(text) {
     const normalizedTokens = semanticTokenSet(cleaned);
     if (!normalizedTokens.size)
         return null;
+    const semanticFamilyHits = new Map();
+    for (const token of normalizedTokens) {
+        const familyKey = token === 'authorization' ? 'self-authorization' :
+            token === 'proof' ? 'outward-proof' :
+                token === 'certainty' ? 'certainty-delay' :
+                    token === 'alignment' ? 'alignment-drift' :
+                        token === 'family' ? 'family-mission' :
+                            token === 'depth' ? 'depth-craft' :
+                                token === 'output' ? 'output-anchor' :
+                                    token === 'relationship' ? 'relationship-attunement' :
+                                        token === 'collaboration' ? 'collaboration-threshold' :
+                                            token === 'timing' ? 'missed-window' :
+                                                token === 'physical' ? 'physical-pull' :
+                                                    '';
+        if (familyKey) {
+            semanticFamilyHits.set(familyKey, (semanticFamilyHits.get(familyKey) ?? 0) + 1);
+        }
+    }
+    const strongestSemanticHit = [...semanticFamilyHits.entries()]
+        .sort((left, right) => right[1] - left[1])[0];
+    if (strongestSemanticHit && strongestSemanticHit[1] >= 1) {
+        return THEME_FAMILIES.find((family) => family.key === strongestSemanticHit[0]) ?? null;
+    }
     const semanticMatches = THEME_FAMILIES
         .map((family) => {
         const familyAnchor = `${family.title} ${family.questions.join(' ')}`;
@@ -1613,7 +1636,9 @@ function patternTextLooksPlaceholder(text) {
     return (!text.trim() ||
         /^this theme\b/i.test(text.trim()) ||
         /\bkeeps showing up across \d+ entr/i.test(text) ||
-        /\bis emerging around\b/i.test(text));
+        /\bis emerging around\b/i.test(text) ||
+        /\bis present in this entry, but the underlying shape is still emerging\b/i.test(text) ||
+        /\bkeeps recurring across \d+ entries, but the underlying shape is still emerging\b/i.test(text));
 }
 function enrichedPatternLooksWeak(pattern) {
     if (patternTextLooksPlaceholder(pattern.overview))

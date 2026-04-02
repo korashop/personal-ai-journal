@@ -108,6 +108,8 @@ function shouldRefreshPatterns(entriesCount, patterns) {
         return (!clean ||
             /^this theme (?:shows up across|is emerging around)/i.test(clean) ||
             /\bkeeps showing up across \d+ entr/i.test(clean) ||
+            /\bis present in this entry, but the underlying shape is still emerging\b/i.test(clean) ||
+            /\bkeeps recurring across \d+ entries, but the underlying shape is still emerging\b/i.test(clean) ||
             /(?:\.{3,}|…)\s*$/.test(clean) ||
             /\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\s*$/i.test(clean) ||
             (/^[a-z]{2,4}$/.test(lastWord) && !['want', 'need', 'work', 'love', 'team', 'ship', 'real', 'path', 'life'].includes(lastWord)) ||
