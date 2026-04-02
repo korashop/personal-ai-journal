@@ -57,6 +57,14 @@ function normalizeWhitespace(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
 const DANGLING_ENDING_PATTERN = /\s+\b(?:about|after|and|around|as|at|because|before|being|but|despite|for|from|if|in|into|like|of|on|or|over|rather|so|than|that|the|to|versus|we|while|which|who|with|without)\b\s*$/i;
+const SUSPICIOUS_SHORT_FINAL_WORDS = new Set([
+    'sy',
+    'rejec',
+    'statin',
+    'compliment',
+    'mentability',
+    'doriousness',
+]);
 function cleanTruncatedEnding(text) {
     let normalized = text
         .trim()
@@ -901,12 +909,13 @@ function themeCandidateIsSelfConsistent(title, evidence) {
 function evidenceLooksFragmentary(line) {
     const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(line)));
     const words = clean.split(' ').filter(Boolean);
-    const lastWord = words[words.length - 1] ?? '';
+    const lastWord = words[words.length - 1]?.toLowerCase() ?? '';
     return (!clean ||
         words.length < 5 ||
         /(?:^not like\b|^on [A-Z][a-z]+\b|^through\b)/i.test(clean) ||
         /\b(?:which|who|we|i)\s*$/i.test(clean) ||
         /\b(?:would|could|will|to|for|from|about|before|after|because|with|without|into|than)\s*$/i.test(clean) ||
+        SUSPICIOUS_SHORT_FINAL_WORDS.has(lastWord) ||
         (/^[a-z]{2,4}$/.test(lastWord) && !['want', 'need', 'work', 'love', 'team', 'ship', 'real', 'path', 'life'].includes(lastWord)) ||
         /\b(?:img|heic|transcribed journal page)\b/i.test(clean) ||
         DANGLING_ENDING_PATTERN.test(clean));
@@ -1119,8 +1128,14 @@ function dimensionLeadForCluster(cluster, index) {
     const leads = cluster.familyKey ? familyLeads[cluster.familyKey] : null;
     return leads?.[index % leads.length] ?? '';
 }
+function normalizeEvidenceExample(text) {
+    const cleaned = cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(text)));
+    if (!cleaned || evidenceLooksFragmentary(cleaned))
+        return '';
+    return cleaned;
+}
 function buildThemeDimensionText(cluster, evidence, index) {
-    const cleaned = cleanTruncatedEnding(evidence);
+    const cleaned = normalizeEvidenceExample(evidence);
     if (!cleaned || evidenceLooksFragmentary(cleaned))
         return '';
     const lead = dimensionLeadForCluster(cluster, index);
@@ -1171,15 +1186,24 @@ function buildThemeDimensionText(cluster, evidence, index) {
 }
 function buildClusterDimensionLines(cluster) {
     const lines = dedupePatternLines(cluster.evidenceByEntry
+        .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
         .map((item, index) => buildThemeDimensionText(cluster, item.evidence, index))
-        .filter(Boolean)
-        .filter((item) => evidenceBelongsToCluster(cluster, item)));
+        .filter(Boolean));
     if (lines.length)
         return lines.slice(0, 4);
     return dedupePatternLines(cluster.evidenceByEntry
         .map((item) => formatPatternSentence(item.evidence))
         .filter(Boolean)
         .filter((item) => !evidenceLooksFragmentary(item))).slice(0, 4);
+}
+function patternHasEnoughThemeEvidence(pattern) {
+    if (!pattern.entryIds.length || !pattern.dimensions.length)
+        return false;
+    if (pattern.entryIds.length >= 2 && pattern.dimensions.length < 2)
+        return false;
+    if (pattern.dimensions.some((line) => evidenceLooksFragmentary(line)))
+        return false;
+    return true;
 }
 function themeTokenSet(title) {
     return new Set(normalizePatternTitle(title)
@@ -1397,7 +1421,9 @@ function buildQuestionsForTheme(title) {
     ];
 }
 function buildDeterministicPatterns(entries, previousPatterns) {
-    const deterministic = buildPatternClusters(entries).map((cluster) => buildDeterministicPatternFromCluster(cluster));
+    const deterministic = buildPatternClusters(entries)
+        .map((cluster) => buildDeterministicPatternFromCluster(cluster))
+        .filter((pattern) => patternHasEnoughThemeEvidence(pattern));
     return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
         .sort((left, right) => {
         const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0);
@@ -1418,6 +1444,8 @@ function patternsLookWeak(patterns, entriesCount) {
         return true;
     const genericQuestionCount = patterns.filter((pattern) => pattern.questions.every((question) => /what keeps this theme in place right now|what concrete move would test a different way of operating here/i.test(question))).length;
     if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6)
+        return true;
+    if (patterns.some((pattern) => pattern.entryCount >= 2 && pattern.dimensions.length < 2))
         return true;
     return patterns.some((pattern) => /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
         looksTruncatedPatternText(pattern.title) ||
@@ -1547,7 +1575,7 @@ ${clusters
             exploreOptions: dedupePatternLines((enriched.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean)).slice(0, 3),
             entryIds: cluster.entryIds,
         };
-        return enrichedPatternLooksWeak(pattern) ? [] : [pattern];
+        return enrichedPatternLooksWeak(pattern) || !patternHasEnoughThemeEvidence(pattern) ? [] : [pattern];
     });
     return { rawText: text, patterns };
 }
