@@ -93,7 +93,11 @@ function shouldRefreshPatterns(entriesCount, patterns) {
         return true;
     if (patterns.length >= 4 && patterns.every((pattern) => pattern.status === 'emerging'))
         return true;
-    return patterns.some((pattern) => /(?:\.{3,}|…)\s*$/.test(pattern.title ?? '') ||
+    const genericQuestionCount = patterns.filter((pattern) => pattern.questions.every((question) => /what keeps this theme in place right now|what concrete move would test a different way of operating here/i.test(question))).length;
+    if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6)
+        return true;
+    return patterns.some((pattern) => /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
+        /(?:\.{3,}|…)\s*$/.test(pattern.title ?? '') ||
         /(?:\.{3,}|…)\s*$/.test(pattern.overview) ||
         pattern.dimensions.some((dimension) => /(?:\.{3,}|…)\s*$/.test(dimension)) ||
         pattern.questions.some((question) => /(?:\.{3,}|…)\s*$/.test(question)));

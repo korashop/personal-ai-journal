@@ -822,6 +822,201 @@ function dedupeAndRefinePatterns(patterns) {
     }
     return merged;
 }
+const THEME_FAMILIES = [
+    {
+        key: 'physical-pull',
+        title: 'Pull toward physical creation',
+        test: /physical project|physical projects|collage|collages|sports with people|coach(?:es)?|tactile/i,
+        questions: [
+            'What feels different about the kinds of making that involve your body or the physical world?',
+            'What small physical project would test whether this pull is real?',
+        ],
+    },
+    {
+        key: 'relationship-attunement',
+        title: 'Attunement as requirement',
+        test: /dani|relationship|partner|attun|expressive love|closeness|love from/i,
+        questions: [
+            'What does this reveal about the kind of attunement you actually need?',
+            'Where do you keep translating that need into something smaller or safer?',
+        ],
+    },
+    {
+        key: 'collaboration-threshold',
+        title: 'Who not how as threshold',
+        test: /who not how|collaborat|small team|hire|ownership|partner(?:s)?|who'?s/i,
+        questions: [
+            'What kind of collaborator would actually unlock this, not just theoretically help?',
+            'What would make the vision compelling enough for someone else to join?',
+        ],
+    },
+    {
+        key: 'family-mission',
+        title: 'Family as mission',
+        test: /family|build toward family|mission of my life/i,
+        questions: [
+            'What would building toward family require now, not someday?',
+            'How does this aspiration change the way you want to organize your life?',
+        ],
+    },
+    {
+        key: 'alignment-drift',
+        title: 'Distance from alignment',
+        test: /alignment|surrender|meaning|mission|surrender period/i,
+        questions: [
+            'What conditions seem to move you closer to alignment in practice?',
+            'What keeps pulling you into a mode that feels misaligned?',
+        ],
+    },
+    {
+        key: 'depth-craft',
+        title: 'Wanting depth and craft',
+        test: /depth|craft|shallow|deep focus|passion|broad curiosity/i,
+        questions: [
+            'What kind of depth are you actually hungry for here?',
+            'What would make depth feel lived rather than admired from a distance?',
+        ],
+    },
+    {
+        key: 'output-anchor',
+        title: 'Output as anchor',
+        test: /output|produce|producing|consuming|ship|shipping|trace|deliver/i,
+        questions: [
+            'What kind of output would make the day feel real to you?',
+            'Where are you substituting motion or consumption for something shippable?',
+        ],
+    },
+    {
+        key: 'self-authorization',
+        title: 'Pre-authorization before asking',
+        test: /authori[sz]|permission|qualified|capable|capability|skill audit|clarify what (?:you|i am) good at|entitled|imposter/i,
+        questions: [
+            'What would you ask for if you did not need to justify your right to ask first?',
+            'Where are you still trying to earn permission before naming the want?',
+        ],
+    },
+    {
+        key: 'outward-proof',
+        title: 'Looking outward for proof',
+        test: /admired|proof|validation|recognized|someone else want|borrow(?:ing)? certainty|yoni|elie/i,
+        questions: [
+            'Where are you still treating another person as evidence that your desire is legitimate?',
+            'What would shift if you stopped outsourcing conviction here?',
+        ],
+    },
+    {
+        key: 'certainty-delay',
+        title: 'Waiting for certainty',
+        test: /certainty|clarity|waiting|hesitat|delay|stuck|before visible action|visible action|legitimi[sz]e/i,
+        questions: [
+            'What concrete move would create more information than more reflection?',
+            'What are you hoping certainty will spare you from feeling?',
+        ],
+    },
+    {
+        key: 'missed-window',
+        title: 'The missed-window story',
+        test: /regret|missed|earlier|timing|window|8 years|5 years|not acting earlier|closed opportunities/i,
+        questions: [
+            'How much of this story is useful learning, and how much is self-punishment?',
+            'What present-day move would keep this from becoming the next missed window?',
+        ],
+    },
+];
+function themeFamilyForText(text) {
+    const cleaned = `${text}`.trim();
+    if (!cleaned)
+        return null;
+    return THEME_FAMILIES.find((family) => family.test.test(cleaned)) ?? null;
+}
+function semanticToken(token) {
+    if (!token)
+        return '';
+    if (/^(authoriz|authoris|permiss|qualif|capab|skill|impost|entitl)/.test(token))
+        return 'authorization';
+    if (/^(proof|valid|recogn|admir|yoni|elie)/.test(token))
+        return 'proof';
+    if (/^(certain|clarit|wait|delay|hesit|stuck|legitim)/.test(token))
+        return 'certainty';
+    if (/^(align|surrend|mean|mission)/.test(token))
+        return 'alignment';
+    if (/^(family)/.test(token))
+        return 'family';
+    if (/^(depth|craft|shallow|focus|passion|curios)/.test(token))
+        return 'depth';
+    if (/^(output|produc|consum|ship|deliver|trace)/.test(token))
+        return 'output';
+    if (/^(dani|attun|love|partner|close|relationship)/.test(token))
+        return 'relationship';
+    if (/^(collabor|team|hire|owner|who|partner)/.test(token))
+        return 'collaboration';
+    if (/^(regret|miss|tim|window|earlier|late)/.test(token))
+        return 'timing';
+    if (/^(physic|collage|sport|coach|tactile)/.test(token))
+        return 'physical';
+    return token;
+}
+function semanticTokenSet(text) {
+    return new Set(normalizePatternTitle(stripMarkdown(text))
+        .split(' ')
+        .map((token) => semanticToken(token))
+        .filter((token) => token.length > 2)
+        .filter((token) => !['the', 'and', 'with', 'from', 'into', 'your', 'that', 'this', 'about'].includes(token)));
+}
+function semanticSimilarity(left, right) {
+    const leftTokens = semanticTokenSet(left);
+    const rightTokens = semanticTokenSet(right);
+    if (!leftTokens.size || !rightTokens.size)
+        return 0;
+    let shared = 0;
+    for (const token of leftTokens) {
+        if (rightTokens.has(token))
+            shared += 1;
+    }
+    return shared / Math.max(leftTokens.size, rightTokens.size);
+}
+function titleQualityScore(title) {
+    const cleaned = simplifyPatternTitle(title);
+    const words = normalizePatternTitle(cleaned).split(' ').filter(Boolean);
+    let score = 0;
+    if (words.length >= 2 && words.length <= 6)
+        score += 3;
+    if (words.length === 1 || words.length > 8)
+        score -= 2;
+    if (/^(this|that|what|the)$/.test(words[0] ?? ''))
+        score -= 2;
+    if (cleaned.length > 56)
+        score -= 1;
+    return score;
+}
+function chooseBestClusterTitle(cluster) {
+    const family = cluster.familyKey ? THEME_FAMILIES.find((item) => item.key === cluster.familyKey) : null;
+    if (family)
+        return family.title;
+    const rankedTitles = [...cluster.titleWeights.entries()]
+        .sort((left, right) => {
+        const rightScore = right[1] + titleQualityScore(right[0]);
+        const leftScore = left[1] + titleQualityScore(left[0]);
+        if (rightScore !== leftScore)
+            return rightScore - leftScore;
+        return left[0].length - right[0].length;
+    })
+        .map(([title]) => title);
+    return simplifyPatternTitle(rankedTitles[0] ?? 'Recurring thread');
+}
+function buildOverviewFromCluster(title, entryCount, evidence) {
+    const lead = cleanTruncatedEnding(evidence[0] ?? '');
+    const second = cleanTruncatedEnding(evidence.find((item, index) => index > 0 && semanticSimilarity(item, lead) < 0.42) ?? '');
+    if (entryCount >= 2) {
+        const parts = [
+            `${title} keeps showing up across ${entryCount} entries.`,
+            lead,
+            second && !normalizePatternTitle(second).includes(normalizePatternTitle(lead)) ? second : '',
+        ].filter(Boolean);
+        return cleanTruncatedEnding(parts.join(' '));
+    }
+    return cleanTruncatedEnding(lead || `${title} is active in the recent journal.`);
+}
 function themeTokenSet(title) {
     return new Set(normalizePatternTitle(title)
         .split(' ')
@@ -848,38 +1043,61 @@ function buildLocalThemeCandidates(entries) {
             .map((section) => ({
             title: simplifyPatternTitle(section.title),
             evidence: firstSentence(section.content, 160) || cleanTruncatedEnding(entry.summary),
+            weight: 3,
         })) ?? [];
         const signalCandidates = entry.analysis?.patternSignals?.map((signal) => ({
             title: simplifyPatternTitle(signal),
             evidence: cleanTruncatedEnding(entry.summary),
+            weight: 4,
         })) ?? [];
-        const feedLabelCandidates = entry.analysis?.feedLabels
-            ?.filter((label) => !['Work', 'Relationships', 'Identity', 'Meaning', 'Ventures', 'Decisions', 'General'].includes(label))
-            .map((label) => ({
-            title: simplifyPatternTitle(label),
-            evidence: cleanTruncatedEnding(entry.summary),
-        })) ?? [];
-        const titleCandidate = entry.title
-            ? [{
-                    title: simplifyPatternTitle(entry.title),
-                    evidence: cleanTruncatedEnding(entry.summary),
-                }]
-            : [];
-        const combined = [...sectionCandidates, ...signalCandidates, ...feedLabelCandidates, ...titleCandidate]
+        const digestCandidates = entry.analysis?.entryDigest
+            ?.filter((item) => item.includes(':'))
+            .map((item) => {
+            const [title, ...rest] = item.split(':');
+            return {
+                title: simplifyPatternTitle(title),
+                evidence: cleanTruncatedEnding(rest.join(':').trim() || entry.summary),
+                weight: 2,
+            };
+        }) ?? [];
+        const combined = [...signalCandidates, ...sectionCandidates, ...digestCandidates]
             .filter((candidate) => candidate.title && candidate.evidence)
-            .slice(0, 6);
+            .sort((left, right) => right.weight - left.weight)
+            .slice(0, 8);
+        const familyBuckets = new Map();
+        const uncategorized = [];
         for (const candidate of combined) {
+            const family = themeFamilyForText(`${candidate.title} ${candidate.evidence}`);
+            if (!family) {
+                uncategorized.push(candidate);
+                continue;
+            }
+            const existing = familyBuckets.get(family.key);
+            if (!existing || candidate.weight > existing.weight) {
+                familyBuckets.set(family.key, { ...candidate, title: family.title });
+            }
+        }
+        const distinctUncategorized = uncategorized.filter((candidate, index) => uncategorized.findIndex((other) => normalizePatternTitle(other.title) === normalizePatternTitle(candidate.title) ||
+            semanticSimilarity(`${other.title} ${other.evidence}`, `${candidate.title} ${candidate.evidence}`) >= 0.72) === index);
+        for (const candidate of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 2)]) {
+            const family = themeFamilyForText(`${candidate.title} ${candidate.evidence}`);
             candidates.push({
                 title: candidate.title,
                 entryId: entry.id,
                 evidence: candidate.evidence,
                 createdAt: entry.createdAt,
+                weight: candidate.weight,
+                familyKey: family?.key,
             });
         }
     }
     return candidates;
 }
 function buildQuestionsForTheme(title) {
+    const family = themeFamilyForText(title);
+    if (family) {
+        return family.questions;
+    }
     const lower = title.toLowerCase();
     if (/permission|certainty|proof|validation|qualified|admir/.test(lower)) {
         return [
@@ -909,16 +1127,22 @@ function buildDeterministicPatterns(entries, previousPatterns) {
     const clusters = [];
     for (const candidate of localCandidates) {
         const existing = clusters.find((cluster) => {
+            if (candidate.familyKey && cluster.familyKey === candidate.familyKey)
+                return true;
             const sameTitle = normalizePatternTitle(cluster.title) === normalizePatternTitle(candidate.title);
-            const similar = themeTitleSimilarity(cluster.title, candidate.title) >= 0.72;
-            return sameTitle || similar;
+            const titleSimilar = themeTitleSimilarity(cluster.title, candidate.title) >= 0.72;
+            const contentSimilar = semanticSimilarity(`${cluster.title} ${cluster.evidence.slice(0, 3).join(' ')}`, `${candidate.title} ${candidate.evidence}`) >= 0.46;
+            return sameTitle || titleSimilar || contentSimilar;
         });
         if (!existing) {
             clusters.push({
                 title: candidate.title,
+                titleWeights: new Map([[candidate.title, candidate.weight]]),
+                familyKey: candidate.familyKey,
                 entryIds: new Set([candidate.entryId]),
                 evidence: [candidate.evidence],
                 createdAt: candidate.createdAt,
+                totalWeight: candidate.weight,
             });
             continue;
         }
@@ -929,34 +1153,41 @@ function buildDeterministicPatterns(entries, previousPatterns) {
         if (candidate.createdAt > existing.createdAt) {
             existing.createdAt = candidate.createdAt;
         }
-        if (candidate.title.length > existing.title.length) {
-            existing.title = candidate.title;
-        }
+        existing.totalWeight += candidate.weight;
+        existing.familyKey = existing.familyKey ?? candidate.familyKey;
+        existing.titleWeights.set(candidate.title, (existing.titleWeights.get(candidate.title) ?? 0) + candidate.weight);
+        existing.title = chooseBestClusterTitle(existing);
     }
-    const deterministic = clusters
+    const scoredClusters = clusters
         .filter((cluster) => cluster.title && cluster.evidence.length)
         .sort((left, right) => {
-        const rightScore = right.entryIds.size * 5 + right.evidence.length;
-        const leftScore = left.entryIds.size * 5 + left.evidence.length;
+        const rightScore = right.entryIds.size * 100 + right.totalWeight * 4 + right.evidence.length;
+        const leftScore = left.entryIds.size * 100 + left.totalWeight * 4 + left.evidence.length;
         if (rightScore !== leftScore)
             return rightScore - leftScore;
         return right.createdAt.localeCompare(left.createdAt);
-    })
-        .slice(0, 8)
-        .map((cluster) => {
+    });
+    const recurringClusters = scoredClusters.filter((cluster) => cluster.entryIds.size >= 2);
+    const singletonClusters = scoredClusters.filter((cluster) => cluster.entryIds.size < 2);
+    const selectedClusters = [
+        ...recurringClusters.slice(0, 7),
+        ...(recurringClusters.length >= 4
+            ? singletonClusters.slice(0, 1)
+            : singletonClusters.slice(0, Math.max(0, 5 - recurringClusters.length)).slice(0, 2)),
+    ].slice(0, 8);
+    const deterministic = selectedClusters.map((cluster) => {
         const evidence = dedupePatternLines(cluster.evidence.map((item) => cleanTruncatedEnding(item))).slice(0, 4);
-        const overview = cluster.entryIds.size > 1
-            ? `This theme shows up across ${cluster.entryIds.size} entries. Right now it centers on ${evidence[0] ?? 'a recurring tension.'}`
-            : `This theme is emerging around ${evidence[0] ?? 'a live thread in the journal.'}`;
+        const title = chooseBestClusterTitle(cluster);
+        const overview = buildOverviewFromCluster(title, cluster.entryIds.size, evidence);
         return {
-            title: simplifyPatternTitle(cluster.title),
+            title,
             overview: cleanTruncatedEnding(overview),
             dimensions: evidence,
-            questions: buildQuestionsForTheme(cluster.title),
+            questions: buildQuestionsForTheme(title),
             exploreOptions: [
-                `Trace how ${cluster.title.toLowerCase()} evolves across entries`,
-                `Find the cost of ${cluster.title.toLowerCase()}`,
-                `Look for the next concrete move inside ${cluster.title.toLowerCase()}`,
+                `Trace how ${title.toLowerCase()} evolves across entries`,
+                `Find the cost of ${title.toLowerCase()}`,
+                `Look for the next concrete move inside ${title.toLowerCase()}`,
             ].map((item) => cleanTruncatedEnding(item)).slice(0, 3),
             entryIds: [...cluster.entryIds],
         };
@@ -1012,7 +1243,11 @@ function patternsLookWeak(patterns, entriesCount) {
         return true;
     if (patterns.every((pattern) => pattern.status === 'emerging'))
         return true;
-    return patterns.some((pattern) => looksTruncatedPatternText(pattern.title) ||
+    const genericQuestionCount = patterns.filter((pattern) => pattern.questions.every((question) => /what keeps this theme in place right now|what concrete move would test a different way of operating here/i.test(question))).length;
+    if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6)
+        return true;
+    return patterns.some((pattern) => /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
+        looksTruncatedPatternText(pattern.title) ||
         looksTruncatedPatternText(pattern.overview) ||
         pattern.dimensions.some(looksTruncatedPatternText));
 }
@@ -1147,11 +1382,15 @@ function reconcilePatterns(previousPatterns, nextPatterns) {
         }
         const previousCount = matched?.entryCount ?? 0;
         const nextCount = pattern.entryIds.length;
-        const status = !matched || nextCount <= 2
-            ? 'emerging'
-            : nextCount > previousCount
+        const status = !matched
+            ? nextCount >= 3
+                ? 'active'
+                : 'emerging'
+            : nextCount >= Math.max(previousCount + 2, 4)
                 ? 'deepening'
-                : 'active';
+                : nextCount >= 2 || previousCount >= 2
+                    ? 'active'
+                    : 'emerging';
         return {
             ...pattern,
             id: matched?.id ?? `pattern-${slugify(pattern.title) || Math.random().toString(36).slice(2, 8)}`,
