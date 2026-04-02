@@ -122,9 +122,20 @@ export function EntryDetail({ busy, entry, loadingEntry, onBack, onDelete, onRea
           </div>
         </div>
 
+        {entry.analysis?.entryDigest.length ? (
+          <div className="entry-digest">
+            <p className="subtle-label">At a glance</p>
+            <ul className="entry-digest-list">
+              {entry.analysis.entryDigest.map((bullet) => (
+                <li key={bullet}>{bullet}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {entry.analysis?.contextBullets.length ? (
           <div className="entry-context-brief">
-            <p className="subtle-label">What was in this entry</p>
+            <p className="subtle-label">Context from the raw entry</p>
             <ul className="entry-context-list">
               {entry.analysis.contextBullets.map((bullet) => (
                 <li key={bullet}>{bullet}</li>

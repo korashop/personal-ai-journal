@@ -659,13 +659,34 @@ button {
   margin: 4px 0 6px;
 }
 
+.entry-digest {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+  margin: 6px 0 2px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(142, 184, 199, 0.14);
+  background: rgba(142, 184, 199, 0.06);
+}
+
+.entry-digest-list,
 .entry-context-list {
   margin: 0;
   padding-left: 1.2rem;
-  color: var(--muted);
   line-height: 1.65;
 }
 
+.entry-digest-list {
+  color: var(--text);
+}
+
+.entry-context-list {
+  color: var(--muted);
+}
+
+.entry-digest-list li,
 .entry-context-list li {
   margin-bottom: 0.38rem;
 }
@@ -901,6 +922,15 @@ button {
   margin: 0 0 10px;
   font-size: 1.02rem;
   color: var(--accent-strong);
+}
+
+.analysis-card ul,
+.analysis-card ol {
+  padding-left: 1.2rem;
+}
+
+.analysis-card li {
+  margin-bottom: 0.55rem;
 }
 
 .analysis-card.flowing {

@@ -219,6 +219,16 @@ function buildContextBullets(rawText: string) {
   return cleaned.slice(0, 3).map((line) => clip(line, 120))
 }
 
+function buildEntryDigest(rawText: string) {
+  const cleaned = buildAnalysisInput(rawText)
+    .split('\n')
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean)
+    .filter((line) => !looksLikeScaffolding(line))
+
+  return cleaned.slice(0, 4).map((line) => clip(line, 140))
+}
+
 function memoryForPrompt(memoryDoc: MemoryDocumentRecord | null, maxLength = 2400) {
   return memoryDoc?.content ? clipForPrompt(memoryDoc.content, maxLength) : 'No memory document yet.'
 }
@@ -240,7 +250,11 @@ function highlightsForPrompt(highlights: HighlightRecord[], maxEntries = 2, maxL
 function patternEntriesForPrompt(entries: JournalEntry[], maxEntries = 8) {
   return entries
     .slice(0, maxEntries)
-    .map((entry) => `- ${entry.id} | ${clipForPrompt(entry.title, 70)} | ${clipForPrompt(entry.summary, 170)} | tags: ${entry.tags.join(', ')}`)
+    .map((entry) => {
+      const digest = entry.analysis?.entryDigest?.slice(0, 3).join(' / ') ?? ''
+      const sectionTitles = entry.analysis?.sections?.map((section) => section.title).slice(0, 4).join(', ') ?? ''
+      return `- ${entry.id} | ${clipForPrompt(entry.title, 70)} | ${clipForPrompt(entry.summary, 170)} | digest: ${clipForPrompt(digest || 'None', 220)} | sections: ${clipForPrompt(sectionTitles || 'None', 120)} | tags: ${entry.tags.join(', ')}`
+    })
     .join('\n')
 }
 
@@ -323,6 +337,7 @@ function fallbackAnalysis(rawText: string, tags: string[]): AnalysisPayload {
   return {
     title: deriveDisplayTitle(cleanedRaw || rawText, cleanedRaw || rawText, tags),
     summary: deriveDisplaySummary(summary, cleanedRaw || rawText),
+    entryDigest: buildEntryDigest(cleanedRaw || rawText),
     contextBullets: buildContextBullets(cleanedRaw || rawText),
     sections,
     exploreOptions: [
@@ -346,6 +361,7 @@ Use this exact shape:
 {
   "title": "a short durable title",
   "summary": "1 or 2 sentence feed summary",
+  "entryDigest": ["short bullet capturing a distinct thing that came up"],
   "contextBullets": ["short source-context bullet"],
   "sections": [{ "title": "string", "content": "markdown string" }],
   "exploreOptions": ["string"],
@@ -377,6 +393,7 @@ ${malformedResponse}`
   const parsed = parseJsonFromText<{
     title?: string
     summary?: string
+    entryDigest?: string[]
     contextBullets?: string[]
     sections?: Array<{ title?: string; content?: string }>
     exploreOptions?: string[]
@@ -400,6 +417,7 @@ ${malformedResponse}`
   return {
     title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), rawText, tags),
     summary: deriveDisplaySummary(parsed.summary?.trim(), rawText),
+    entryDigest: (parsed.entryDigest ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
     contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
     sections,
     exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
@@ -430,6 +448,7 @@ Return JSON only with this shape:
 {
   "title": "a short durable title for the entry feed",
   "summary": "one concise but informative summary for the entry feed",
+  "entryDigest": ["3 to 5 short bullets capturing distinct things that came up in the entry"],
   "contextBullets": ["2 to 3 short bullets capturing what the user was actually describing"],
   "sections": [
     { "title": "string", "content": "markdown string" }
@@ -446,12 +465,16 @@ Rules:
 - Use complete thoughts. Do not end sections with ellipses or sentence fragments.
 - The title should sound like the real center of gravity of the entry, not the first sentence and not "Claude's analysis..."
 - The summary should help the user recognize what this entry is actually about later, in 1 or 2 sentences max.
+- The entryDigest should be the fastest honest answer to "what came up here?" Use it for distinct topics, scenes, decisions, or people mentioned.
 - Context bullets should be short, concrete, and source-oriented. Think "what was happening / what was being wrestled with", not interpretation.
 - Do not simply restate the first section in shorter form.
 - Explore options should feel like meaningful next angles, not generic prompts.
 - Feed labels should be short and useful, not broad buckets unless those are genuinely the right level.
 - If the entry is long, account for the whole thing. Do not analyze only the beginning and ignore later turns.
 - If you notice a change between the beginning, middle, and end, include that movement in the analysis.
+- If the entry contains multiple unrelated or loosely related threads, separate them. Do not force them into one coherent narrative unless the relationship is actually clear.
+- Use section titles that reflect distinct threads, not generic therapy headings.
+- Inside sections, prefer short paragraphs and bullets when that makes the thinking easier to scan without losing depth.
 
 Memory doc:
 ${memoryForPrompt(context.memoryDoc, isLongEntry ? 800 : 2400)}
@@ -483,6 +506,7 @@ ${analysisEntryText}`
     const parsed = parseJsonFromText<{
       title?: string
       summary?: string
+      entryDigest?: string[]
       contextBullets?: string[]
       sections?: Array<{ title?: string; content?: string }>
       exploreOptions?: string[]
@@ -510,6 +534,7 @@ ${analysisEntryText}`
     return {
       title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), cleanedRaw, tags),
       summary: deriveDisplaySummary(parsed.summary?.trim(), cleanedRaw),
+      entryDigest: (parsed.entryDigest ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
       contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
       sections,
       exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
@@ -734,7 +759,7 @@ export async function buildPatterns(
   entries: JournalEntry[],
   previousPatterns: PatternSection[] = [],
 ): Promise<PatternSection[]> {
-  const recentEntries = entries.slice(0, 12)
+  const recentEntries = entries.slice(0, 14)
   const heuristics = [
     {
       id: 'pattern-validation',
@@ -788,6 +813,7 @@ Return JSON only:
 
 Rules:
 - Return the real set of important themes. Do not target a number for its own sake.
+- For 10+ entries, prefer a richer map. Usually 5 to 8 themes is better than 2 or 3 giant umbrellas if the material supports it.
 - Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
 - Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
 - Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
@@ -796,6 +822,7 @@ Rules:
 - Do not inflate the list with weak themes just to have more themes.
 - Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
 - If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
+- It is okay to include smaller, more specific emerging themes if they reveal an important live thread.
 - Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
 - Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
 - Themes can vary in depth.
@@ -803,6 +830,7 @@ Rules:
 - Do not just repeat entry text. Synthesize.
 - Prefer psychological or decision-making patterns over broad topic tags.
 - If a broad domain like work appears, refine it into the actual thread inside the writing.
+- Prefer more granularity when a single broad theme hides multiple different mechanisms.
 - The overview, dimensions, and questions must do different jobs:
   - overview = the mechanism and why it matters now
   - dimensions = observable ways this pattern shows up, concrete tensions, or recurring situations
@@ -812,12 +840,13 @@ Rules:
 - If a line belongs in overview, do not repeat it in dimensions.
 - If a line is already an observation, do not rewrite it as a fake question.
 - Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
+- Use the full spread of entries below. Do not anchor only on the dominant repeated theme if other meaningful threads are present.
 
 Memory:
 ${memoryForPrompt(memoryDoc, 1800)}
 
 Entries:
-${patternEntriesForPrompt(recentEntries, 10)}
+${patternEntriesForPrompt(recentEntries, 14)}
 
 Existing themes to preserve when still active:
 ${previousPatternsForPrompt(previousPatterns)}

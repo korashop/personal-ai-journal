@@ -39,11 +39,11 @@ export default function App() {
 
   const loadBootstrap = useCallback(async (
     preferredEntryId?: string | null,
-    options?: { preserveSelection?: boolean },
+    options?: { preserveSelection?: boolean; rebuildPatterns?: boolean },
   ) => {
     try {
       setError(null)
-      const response = await fetchBootstrap(preferredEntryId)
+      const response = await fetchBootstrap(preferredEntryId, { rebuildPatterns: options?.rebuildPatterns })
       setBootstrap(response)
       const nextSelectedId =
         options?.preserveSelection
@@ -259,6 +259,9 @@ export default function App() {
               }}
               onRefreshAfterThemeReply={async () => {
                 await loadBootstrap(null, { preserveSelection: true })
+              }}
+              onRebuildPatterns={async () => {
+                await loadBootstrap(null, { rebuildPatterns: true })
               }}
               patterns={bootstrap.patterns}
             />

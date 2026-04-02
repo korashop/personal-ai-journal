@@ -39,6 +39,11 @@ export const demoEntries: JournalEntry[] = [
     analysis: {
       title: 'Speed versus self-protection',
       summary: 'You want momentum, but your behavior is still optimized around avoiding visible mistakes.',
+      entryDigest: [
+        'Wants to move faster',
+        'Keeps organizing behavior around avoiding visible mistakes',
+        'The tradeoff is starting to feel dishonest',
+      ],
       contextBullets: [
         'Wants to move faster but keeps organizing behavior around avoiding visible mistakes',
         'The tradeoff is starting to feel dishonest rather than prudent',

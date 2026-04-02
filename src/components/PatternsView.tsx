@@ -61,6 +61,7 @@ type PatternsViewProps = {
   patterns: PatternSection[]
   onOpenEntry: (entryId: string) => void
   onRefreshAfterThemeReply: () => Promise<void>
+  onRebuildPatterns: () => Promise<void>
 }
 
 type ThemeMessage = {
@@ -70,7 +71,7 @@ type ThemeMessage = {
   state?: 'pending' | 'complete'
 }
 
-export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterThemeReply, patterns }: PatternsViewProps) {
+export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterThemeReply, onRebuildPatterns, patterns }: PatternsViewProps) {
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
   const [showChatPanel, setShowChatPanel] = useState(true)
@@ -78,6 +79,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
   const [busy, setBusy] = useState(false)
   const [refreshingThread, setRefreshingThread] = useState(false)
+  const [rebuildingPatterns, setRebuildingPatterns] = useState(false)
 
   useEffect(() => {
     try {
@@ -261,6 +263,20 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
               <div className="pattern-focus-actions">
                 <button className="ghost-button" onClick={() => setSelectedPatternId(null)} type="button">
                   Back to themes
+                </button>
+                <button
+                  className="ghost-button"
+                  disabled={rebuildingPatterns}
+                  onClick={() => {
+                    setRebuildingPatterns(true)
+                    void onRebuildPatterns().finally(() => {
+                      setRebuildingPatterns(false)
+                    })
+                  }}
+                  type="button"
+                >
+                  {rebuildingPatterns ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                  {rebuildingPatterns ? 'Rebuilding map...' : 'Rebuild map'}
                 </button>
                 <button className="ghost-button" onClick={() => setShowMemoryInspector((current) => !current)} type="button">
                   {showMemoryInspector ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

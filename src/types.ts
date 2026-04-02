@@ -19,6 +19,7 @@ export type AnalysisSection = {
 export type AnalysisPayload = {
   title: string
   summary: string
+  entryDigest: string[]
   contextBullets: string[]
   sections: AnalysisSection[]
   exploreOptions: string[]
