@@ -78,6 +78,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
   const [busy, setBusy] = useState(false)
   const [refreshingThread, setRefreshingThread] = useState(false)
+  const [staleSyncAttempts, setStaleSyncAttempts] = useState(0)
 
   useEffect(() => {
     try {
@@ -112,6 +113,23 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   useEffect(() => {
     setShowChatPanel(true)
   }, [selectedPatternId])
+
+  useEffect(() => {
+    if (patterns.length > 3 || entries.length < 10) {
+      setStaleSyncAttempts(0)
+      return
+    }
+    if (staleSyncAttempts >= 2) return
+
+    const timeoutId = window.setTimeout(() => {
+      void onRefreshAfterThemeReply()
+      setStaleSyncAttempts((current) => current + 1)
+    }, staleSyncAttempts === 0 ? 1800 : 4200)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [entries.length, onRefreshAfterThemeReply, patterns.length, staleSyncAttempts])
 
   const selectedPattern = useMemo(
     () => (selectedPatternId ? patterns.find((pattern) => pattern.id === selectedPatternId) ?? null : null),

@@ -83,11 +83,12 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
       summary: deriveDisplaySummary(candidate.summary, rawText),
       entryDigest: [
         deriveDisplaySummary(candidate.summary, rawText),
-        ...candidate.sections
-          .map((section) => section.title)
-          .filter((title): title is string => Boolean(title))
-          .slice(0, 3),
-      ].filter(Boolean),
+        ...rawText
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(0, 4),
+      ].filter(Boolean).slice(0, 5),
       contextBullets: [],
       sections: candidate.sections
         .filter((section) => section.title && section.content)
@@ -127,8 +128,12 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
     summary: deriveDisplaySummary(candidate.summary ?? candidate.restate, rawText),
     entryDigest: [
       deriveDisplaySummary(candidate.summary ?? candidate.restate, rawText),
-      ...legacySections.map((section) => section.title).slice(0, 3),
-    ].filter(Boolean),
+      ...rawText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+    ].filter(Boolean).slice(0, 5),
     contextBullets: [],
     sections: legacySections,
     exploreOptions: [

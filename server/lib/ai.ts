@@ -225,8 +225,24 @@ function buildEntryDigest(rawText: string) {
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean)
     .filter((line) => !looksLikeScaffolding(line))
+  if (cleaned.length <= 5) {
+    return cleaned.slice(0, 5).map((line) => clip(line, 140))
+  }
 
-  return cleaned.slice(0, 4).map((line) => clip(line, 140))
+  const picks = [
+    ...cleaned.slice(0, 2),
+    cleaned[Math.floor(cleaned.length / 2)],
+    ...cleaned.slice(-2),
+  ].filter(Boolean)
+
+  const deduped: string[] = []
+  for (const line of picks) {
+    const normalized = normalizeWhitespace(line).toLowerCase()
+    if (deduped.some((existing) => normalizeWhitespace(existing).toLowerCase() === normalized)) continue
+    deduped.push(line)
+  }
+
+  return deduped.slice(0, 5).map((line) => clip(line, 140))
 }
 
 function looksAbstractDigestLine(line: string) {
@@ -258,6 +274,160 @@ function finalizeEntryDigest(candidateLines: string[] | undefined, rawText: stri
   }
 
   return deduped.slice(0, 5)
+}
+
+async function repairPatternJson(
+  malformedResponse: string,
+  memoryDoc: MemoryDocumentRecord | null,
+  entries: JournalEntry[],
+  previousPatterns: PatternSection[],
+): Promise<
+  Array<{
+    title: string
+    overview: string
+    dimensions: string[]
+    questions: string[]
+    exploreOptions: string[]
+    entryIds: string[]
+  }>
+  | null
+> {
+  if (!anthropic) return null
+
+  const prompt = `Convert the following malformed theme synthesis into strict JSON only.
+Use this exact shape:
+[
+  {
+    "title": "theme title",
+    "overview": "state of affairs",
+    "dimensions": ["distinct way the theme shows up"],
+    "questions": ["useful unresolved question"],
+    "exploreOptions": ["one way to engage this theme"],
+    "entryIds": ["entry id"]
+  }
+]
+
+Rules:
+- Keep the real distinct themes. Do not collapse them unnecessarily.
+- Preserve continuity with existing themes when appropriate.
+- Use only entry IDs from the provided entries.
+
+Memory:
+${memoryForPrompt(memoryDoc, 1400)}
+
+Entries:
+${patternEntriesForPrompt(entries, 18)}
+
+Existing themes:
+${previousPatternsForPrompt(previousPatterns)}
+
+Malformed theme synthesis:
+${malformedResponse}`
+
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 1600,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = response.content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+
+  const parsed = parseJsonFromText<
+    Array<{
+      title?: string
+      overview?: string
+      dimensions?: string[]
+      questions?: string[]
+      exploreOptions?: string[]
+      entryIds?: string[]
+    }>
+  >(text)
+
+  if (!parsed) return null
+
+  return parsed
+    .filter((item) => item.title && item.overview)
+    .map((item) => ({
+      title: simplifyPatternTitle(item.title!.trim()),
+      overview: item.overview!.trim(),
+      dimensions: (item.dimensions ?? []).map((signal) => signal.trim()).filter(Boolean),
+      questions: (item.questions ?? []).map((question) => question.trim()).filter(Boolean),
+      exploreOptions: (item.exploreOptions ?? []).map((option) => option.trim()).filter(Boolean).slice(0, 4),
+      entryIds: (item.entryIds ?? []).filter(Boolean),
+    }))
+}
+
+async function retryAnalysisWithTighterPrompt(rawText: string, tags: string[]) {
+  if (!anthropic) return null
+
+  const prompt = `Analyze this journal entry.
+Return JSON only with this shape:
+{
+  "title": "short durable title",
+  "summary": "1 or 2 sentence summary",
+  "entryDigest": ["concrete thing that came up in the entry"],
+  "contextBullets": ["short source-context bullet"],
+  "sections": [{ "title": "string", "content": "markdown string" }],
+  "exploreOptions": ["string"],
+  "feedLabels": ["string"]
+}
+
+Rules:
+- Separate distinct threads when they are not actually one thing.
+- Keep entryDigest concrete and source-grounded.
+- Use short paragraphs and bullets when useful.
+- Do not use generic headings like Overview unless truly necessary.
+
+Entry:
+${clipLongEntryForAnalysis(rawText, 7000)}`
+
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 1500,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = response.content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+
+  const parsed = parseJsonFromText<{
+    title?: string
+    summary?: string
+    entryDigest?: string[]
+    contextBullets?: string[]
+    sections?: Array<{ title?: string; content?: string }>
+    exploreOptions?: string[]
+    feedLabels?: string[]
+  }>(text)
+
+  if (!parsed) return null
+
+  const sections = (parsed.sections ?? [])
+    .filter((section) => section.title && section.content)
+    .map((section, index) => ({
+      id: `retry-section-${index + 1}`,
+      title: section.title!.trim(),
+      content: section.content!.trim(),
+    }))
+
+  if (!sections.length) return null
+
+  const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3)
+
+  return {
+    title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), rawText, tags),
+    summary: deriveDisplaySummary(parsed.summary?.trim(), rawText),
+    entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
+    contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
+    sections,
+    exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+    feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, rawText, sections),
+  }
 }
 
 function memoryForPrompt(memoryDoc: MemoryDocumentRecord | null, maxLength = 2400) {
@@ -575,7 +745,9 @@ ${analysisEntryText}`
     }
   } catch {
     const repaired = await repairAnalysisJson(text, cleanedRaw, tags)
-    return repaired ?? fallbackAnalysis(cleanedRaw, tags)
+    if (repaired) return repaired
+    const retried = await retryAnalysisWithTighterPrompt(cleanedRaw, tags)
+    return retried ?? fallbackAnalysis(cleanedRaw, tags)
   }
 }
 
@@ -954,7 +1126,18 @@ ${previousPatternsForPrompt(previousPatterns)}
           .slice(0, 9)
       }
     } catch {
-      // Fall through to heuristic build.
+      const repaired = await repairPatternJson(text, memoryDoc, recentEntries, previousPatterns).catch(() => null)
+      if (repaired?.length) {
+        const paddedPatterns = dedupeAndRefinePatterns(repaired)
+        const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))
+        return reconciled
+          .sort((left, right) => {
+            const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
+            const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
+            return rightScore - leftScore
+          })
+          .slice(0, 9)
+      }
     }
   }
 

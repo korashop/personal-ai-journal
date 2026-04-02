@@ -12,6 +12,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const frontendDistPath = join(__dirname, '../dist');
+const patternRefreshInFlight = new Set();
 app.use(cors());
 app.use(express.json({ limit: '4mb' }));
 const createEntrySchema = z.object({
@@ -86,6 +87,23 @@ function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
         console.error('Pattern refresh after reply failed', error);
     });
 }
+function triggerPatternRefresh(userId) {
+    if (patternRefreshInFlight.has(userId))
+        return;
+    patternRefreshInFlight.add(userId);
+    void (async () => {
+        const { store } = getStore();
+        const bootstrap = await store.getBootstrap(userId);
+        const patterns = await buildPatterns(bootstrap.memoryDoc, bootstrap.patternEntries, bootstrap.patterns);
+        await store.updatePatterns(userId, patterns);
+    })()
+        .catch((error) => {
+        console.error('Pattern refresh failed', error);
+    })
+        .finally(() => {
+        patternRefreshInFlight.delete(userId);
+    });
+}
 app.get('/api/health', (_request, response) => {
     response.json({ ok: true });
 });
@@ -93,13 +111,17 @@ app.get('/api/bootstrap', async (request, response, next) => {
     try {
         const { mode, store } = getStore();
         const selectedEntryId = typeof request.query.entryId === 'string' ? request.query.entryId : null;
-        const data = await store.getBootstrap(config.demoUserId, selectedEntryId);
+        const userId = config.demoUserId;
+        const data = await store.getBootstrap(userId, selectedEntryId);
         const needsPatternRefresh = shouldRefreshPatterns(data.patternEntries.length, data.patterns);
-        const patterns = needsPatternRefresh
+        const patterns = !data.patterns.length
             ? await buildPatterns(data.memoryDoc, data.patternEntries, data.patterns)
             : data.patterns;
-        if (needsPatternRefresh && patterns.length) {
-            void store.updatePatterns(config.demoUserId, patterns);
+        if (!data.patterns.length && patterns.length) {
+            void store.updatePatterns(userId, patterns);
+        }
+        else if (needsPatternRefresh) {
+            triggerPatternRefresh(userId);
         }
         response.json({
             entries: data.entries,

@@ -23,6 +23,10 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>
 }
 
+function shouldRetry(response: Response) {
+  return response.status >= 500
+}
+
 export async function fetchBootstrap(entryId?: string | null): Promise<JournalBootstrap> {
   const params = new URLSearchParams()
   if (entryId) {
@@ -34,7 +38,12 @@ export async function fetchBootstrap(entryId?: string | null): Promise<JournalBo
 }
 
 export async function fetchEntry(entryId: string): Promise<EntryRecord> {
-  const response = await fetch(apiUrl(`/api/entries/${encodeURIComponent(entryId)}`))
+  const url = apiUrl(`/api/entries/${encodeURIComponent(entryId)}`)
+  let response = await fetch(url)
+  if (shouldRetry(response)) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500))
+    response = await fetch(url)
+  }
   return parseResponse<EntryRecord>(response)
 }
 
