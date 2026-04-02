@@ -1117,12 +1117,14 @@ function themeCandidateIsSelfConsistent(title: string, evidence: string) {
 function evidenceLooksFragmentary(line: string) {
   const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(line)))
   const words = clean.split(' ').filter(Boolean)
+  const lastWord = words[words.length - 1] ?? ''
   return (
     !clean ||
     words.length < 5 ||
     /(?:^not like\b|^on [A-Z][a-z]+\b|^through\b)/i.test(clean) ||
     /\b(?:which|who|we|i)\s*$/i.test(clean) ||
     /\b(?:would|could|will|to|for|from|about|before|after|because|with|without|into|than)\s*$/i.test(clean) ||
+    (/^[a-z]{2,4}$/.test(lastWord) && !['want', 'need', 'work', 'love', 'team', 'ship', 'real', 'path', 'life'].includes(lastWord)) ||
     /\b(?:img|heic|transcribed journal page)\b/i.test(clean) ||
     DANGLING_ENDING_PATTERN.test(clean)
   )
@@ -1288,9 +1290,77 @@ function formatPatternSentence(text: string) {
   return /[.!?]"?$/.test(sentence) ? sentence : `${sentence}.`
 }
 
-function buildThemeDimensionText(cluster: PatternClusterDraft, evidence: string) {
+function dimensionLeadForCluster(cluster: PatternClusterDraft, index: number) {
+  const familyLeads: Record<string, string[]> = {
+    'self-authorization': [
+      'The ask gets delayed by a need to establish legitimacy first.',
+      'One version of the pattern is translating desire into a case for why you are allowed to ask.',
+      'The journal keeps circling the gap between wanting contact and feeling entitled to initiate it.',
+    ],
+    'outward-proof': [
+      'Another person’s desire, status, or attention becomes a proxy for trusting your own want.',
+      'Instead of moving from internal conviction, the journal keeps checking outward for permission or proof.',
+      'Idealizing someone else can become a way to avoid standing plainly inside your own desire.',
+    ],
+    'alignment-drift': [
+      'Alignment is being tracked as a felt state, and the journal notices when daily choices stop matching it.',
+      'The recurring question is whether the current mode is genuinely aligned or just easier to stay inside.',
+      'Surrender shows up as a standard, and the entry tests where life feels close to or far from that standard.',
+    ],
+    'output-anchor': [
+      'Producing something concrete is standing in for a deeper need to make the day feel traceable and real.',
+      'Shipping reads less like productivity theater and more like proof that the day became something.',
+      'The contrast is between consuming or circling ideas and ending the day with output you can point to.',
+    ],
+    'relationship-attunement': [
+      'The relationship standard is not generic closeness, but visibly felt and expressive attunement.',
+      'What hurts is not just distance, but the absence of love that feels specifically tuned to who you are.',
+      'The Dani material seems to name a bar for being deeply seen rather than merely accompanied.',
+    ],
+    'collaboration-threshold': [
+      'The desire is to move out of solo striving and into a team or partner structure that changes what becomes possible.',
+      'The “who not how” question shows up as wanting complementary collaborators, not just more solitary effort.',
+      'The entry imagines a working structure where shared ownership and taste make the work bigger and more enjoyable.',
+    ],
+    'family-mission': [
+      'Family appears as an organizing life direction, and the journal tests how to build toward it deliberately without losing surrender.',
+      'This is less a someday wish than a question about what kind of present-day operating mode would actually serve that mission.',
+      'The entry treats family as a real axis for life design, not just one future preference among many.',
+    ],
+    'depth-craft': [
+      'The thread is a pull toward deeper craft and sustained immersion, especially where life still feels broad or shallow.',
+      'The journal keeps contrasting surface-level motion with wanting to follow a craft or passion all the way through.',
+      'Depth seems to matter not abstractly, but as a way to feel genuinely claimed by what you are making or learning.',
+    ],
+    'certainty-delay': [
+      'Visible action gets postponed until enough certainty or legitimacy appears, and the delay itself becomes part of the pain.',
+      'The pattern is not only uncertainty; it is waiting for readiness before moving, then feeling the cost of that pause.',
+      'The entry keeps asking what would happen if action came before full certainty rather than after it.',
+    ],
+    'physical-pull': [
+      'Embodied or physical forms of making carry a distinct charge here.',
+      'The pull is toward work and play you can feel in the body, not only think about from a distance.',
+      'Physical projects, sport, or collage seem to offer a more direct kind of aliveness than abstract ideation alone.',
+    ],
+    'missed-window': [
+      'The entry revisits an earlier moment of non-action and asks whether that delay has become a lasting story of missed timing.',
+      'The pattern is replaying old windows you did not step through and trying to decide what signal is still useful now.',
+      'There is a grief thread here: not just what happened, but what feels foreclosed because you waited.',
+    ],
+  }
+
+  const leads = cluster.familyKey ? familyLeads[cluster.familyKey] : null
+  return leads?.[index % leads.length] ?? ''
+}
+
+function buildThemeDimensionText(cluster: PatternClusterDraft, evidence: string, index: number) {
   const cleaned = cleanTruncatedEnding(evidence)
   if (!cleaned || evidenceLooksFragmentary(cleaned)) return ''
+
+  const lead = dimensionLeadForCluster(cluster, index)
+  if (lead) {
+    return formatPatternSentence(`${lead} Example: ${cleaned}`)
+  }
 
   const lower = cleaned.toLowerCase()
   if (cluster.familyKey === 'self-authorization') {
@@ -1339,7 +1409,7 @@ function buildThemeDimensionText(cluster: PatternClusterDraft, evidence: string)
 function buildClusterDimensionLines(cluster: PatternClusterDraft) {
   const lines = dedupePatternLines(
     cluster.evidenceByEntry
-      .map((item) => buildThemeDimensionText(cluster, item.evidence))
+      .map((item, index) => buildThemeDimensionText(cluster, item.evidence, index))
       .filter(Boolean)
       .filter((item) => evidenceBelongsToCluster(cluster, item)),
   )
@@ -1644,9 +1714,12 @@ function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
 
 function looksTruncatedPatternText(text: string) {
   const clean = text.trim()
+  const words = normalizeWhitespace(stripMarkdown(clean)).split(' ').filter(Boolean)
+  const lastWord = words[words.length - 1] ?? ''
   return (
     /(?:\.{3,}|…)\s*$/.test(clean) ||
     /\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\s*$/i.test(clean) ||
+    (/^[a-z]{2,4}$/.test(lastWord) && !['want', 'need', 'work', 'love', 'team', 'ship', 'real', 'path', 'life'].includes(lastWord)) ||
     (/^[A-Za-z]/.test(clean) && !/[.!?"]$/.test(clean) && clean.length > 80)
   )
 }
