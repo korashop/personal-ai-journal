@@ -12,7 +12,6 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const frontendDistPath = join(__dirname, '../dist');
-const patternRefreshInFlight = new Set();
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -89,9 +88,9 @@ function shouldRefreshPatterns(entriesCount, patterns) {
         return true;
     if (entriesCount >= 10 && patterns.length <= 3)
         return true;
-    return patterns.some((pattern) => /\.{3,}\s*$/.test(pattern.overview) ||
-        pattern.dimensions.some((dimension) => /\.{3,}\s*$/.test(dimension)) ||
-        pattern.questions.some((question) => /\.{3,}\s*$/.test(question)));
+    return patterns.some((pattern) => /(?:\.{3,}|…)\s*$/.test(pattern.overview) ||
+        pattern.dimensions.some((dimension) => /(?:\.{3,}|…)\s*$/.test(dimension)) ||
+        pattern.questions.some((question) => /(?:\.{3,}|…)\s*$/.test(question)));
 }
 function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
     void (async () => {
@@ -110,23 +109,6 @@ function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
         console.error('Pattern refresh after reply failed', error);
     });
 }
-function triggerPatternRefresh(userId) {
-    if (patternRefreshInFlight.has(userId))
-        return;
-    patternRefreshInFlight.add(userId);
-    void (async () => {
-        const { store } = getStore();
-        const bootstrap = await store.getBootstrap(userId);
-        const patterns = await buildPatterns(bootstrap.memoryDoc, bootstrap.patternEntries, bootstrap.patterns);
-        await store.updatePatterns(userId, patterns);
-    })()
-        .catch((error) => {
-        console.error('Pattern refresh failed', error);
-    })
-        .finally(() => {
-        patternRefreshInFlight.delete(userId);
-    });
-}
 app.get('/api/health', (_request, response) => {
     response.json({ ok: true });
 });
@@ -137,14 +119,11 @@ app.get('/api/bootstrap', async (request, response, next) => {
         const userId = config.demoUserId;
         const data = await withTransientRetry(() => store.getBootstrap(userId, selectedEntryId));
         const needsPatternRefresh = shouldRefreshPatterns(data.patternEntries.length, data.patterns);
-        const patterns = !data.patterns.length
+        const patterns = !data.patterns.length || needsPatternRefresh
             ? await buildPatterns(data.memoryDoc, data.patternEntries, data.patterns)
             : data.patterns;
-        if (!data.patterns.length && patterns.length) {
+        if ((!data.patterns.length || needsPatternRefresh) && patterns.length) {
             void store.updatePatterns(userId, patterns);
-        }
-        else if (needsPatternRefresh) {
-            triggerPatternRefresh(userId);
         }
         response.json({
             entries: data.entries,

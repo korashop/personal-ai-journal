@@ -246,6 +246,67 @@ function finalizeEntryDigest(candidateLines, rawText) {
     }
     return deduped.slice(0, 5);
 }
+function isGenericSectionTitle(title) {
+    const normalized = normalizeWhitespace(stripMarkdown(title)).toLowerCase();
+    return [
+        'overview',
+        'state of affairs',
+        'core tension',
+        'question to sit with',
+        'what seems active underneath',
+        'main',
+        'under surface',
+        'under-surface',
+    ].includes(normalized);
+}
+function firstSentence(text, maxLength = 140) {
+    const cleaned = cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(text)));
+    if (!cleaned)
+        return '';
+    const sentence = cleaned.split(/(?<=[.!?])\s+/)[0] ?? cleaned;
+    return clip(sentence, maxLength);
+}
+function buildEntryDigestFromSections(sections, rawText) {
+    const derived = sections
+        .filter((section) => !isGenericSectionTitle(section.title))
+        .map((section) => {
+        const title = cleanTruncatedEnding(section.title);
+        const sentence = firstSentence(section.content, 110);
+        if (!title && !sentence)
+            return '';
+        if (!sentence)
+            return title;
+        if (!title)
+            return sentence;
+        if (sentence.toLowerCase().startsWith(title.toLowerCase()))
+            return sentence;
+        return clip(`${title}: ${sentence}`, 150);
+    })
+        .filter(Boolean);
+    if (derived.length >= 3) {
+        return dedupePatternLines(derived).slice(0, 5);
+    }
+    return finalizeEntryDigest(undefined, rawText);
+}
+function buildSummaryLayerFromSections(rawText, tags, sections) {
+    const meaningfulSections = sections.filter((section) => !isGenericSectionTitle(section.title));
+    const summarySource = meaningfulSections
+        .slice(0, 2)
+        .map((section) => firstSentence(section.content, 170))
+        .filter(Boolean)
+        .join(' ') || buildSummary(rawText);
+    return {
+        title: deriveDisplayTitle(meaningfulSections[0]?.title || summarySource, rawText, tags),
+        summary: deriveDisplaySummary(summarySource, rawText),
+        entryDigest: buildEntryDigestFromSections(meaningfulSections.length ? meaningfulSections : sections, rawText),
+        contextBullets: buildContextBullets(rawText),
+        feedLabels: buildFeedLabels(tags, rawText, sections),
+        patternSignals: meaningfulSections
+            .map((section) => cleanTruncatedEnding(section.title))
+            .filter(Boolean)
+            .slice(0, 4),
+    };
+}
 async function repairPatternJson(malformedResponse, memoryDoc, entries, previousPatterns) {
     if (!anthropic)
         return null;
@@ -363,58 +424,6 @@ ${clipLongEntryForAnalysis(rawText, 7000)}`;
         sections,
         exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
         feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, rawText, sections),
-        patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
-    };
-}
-async function generateSummaryLayer(rawText, tags) {
-    if (!anthropic)
-        return null;
-    const prompt = `Create the scan layer for a journal entry.
-Return JSON only with this shape:
-{
-  "title": "short durable title",
-  "summary": "1 or 2 sentence summary",
-  "entryDigest": ["3 to 5 short summary bullets"],
-  "contextBullets": ["2 to 3 short concrete source bullets"],
-  "feedLabels": ["2 to 3 short labels"],
-  "patternSignals": ["2 to 4 short recurring mechanisms or live threads"]
-}
-
-Rules:
-- This is the summary layer only. Do not do the deeper analysis here.
-- entryDigest must be short summary bullets, not copied paragraphs.
-- Each digest bullet should stand alone and capture one distinct thing.
-- Prefer concrete nouns: people, projects, decisions, tensions, scenes.
-- contextBullets should stay close to what was actually described.
-- Keep every item brief. No ellipses.
-- patternSignals should be mechanism-level, 2 to 6 words each.
-
-Entry:
-${clipLongEntryForAnalysis(rawText, 7000)}
-
-Concrete source moments:
-${buildSourceMoments(rawText, 8).map((item) => `- ${item}`).join('\n') || 'None'}
-
-Tags:
-${tags.join(', ') || 'None'}`;
-    const response = await anthropic.messages.create({
-        model: config.anthropicModel,
-        max_tokens: 900,
-        messages: [{ role: 'user', content: prompt }],
-    });
-    const text = response.content
-        .filter((item) => item.type === 'text')
-        .map((item) => item.text)
-        .join('\n');
-    const parsed = parseJsonFromText(text);
-    if (!parsed?.summary)
-        return null;
-    return {
-        title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary.trim(), rawText, tags),
-        summary: deriveDisplaySummary(parsed.summary.trim(), rawText),
-        entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
-        contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
-        feedLabels: (parsed.feedLabels ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
         patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
     };
 }
@@ -625,23 +634,24 @@ export async function generateAnalysis(rawText, tags, context) {
     if (!anthropic) {
         return fallbackAnalysis(cleanedRaw, tags);
     }
-    const summaryLayer = await generateSummaryLayer(cleanedRaw, tags);
-    const analysisLayer = summaryLayer
-        ? await generateAnalysisLayer(cleanedRaw, tags, context, summaryLayer).catch(() => null)
-        : null;
-    if (summaryLayer && analysisLayer && !analysisLooksThin({ ...summaryLayer, sections: analysisLayer.sections }, cleanedRaw)) {
-        return {
-            title: summaryLayer.title,
-            summary: summaryLayer.summary,
-            entryDigest: summaryLayer.entryDigest,
-            contextBullets: summaryLayer.contextBullets,
-            sections: analysisLayer.sections,
-            exploreOptions: analysisLayer.exploreOptions,
-            feedLabels: summaryLayer.feedLabels.length
-                ? summaryLayer.feedLabels
-                : buildFeedLabels(tags, cleanedRaw, analysisLayer.sections),
-            patternSignals: summaryLayer.patternSignals,
-        };
+    const provisionalSummary = buildSummaryLayerFromSections(cleanedRaw, tags, []);
+    const analysisLayer = await generateAnalysisLayer(cleanedRaw, tags, context, provisionalSummary).catch(() => null);
+    if (analysisLayer) {
+        const summaryLayer = buildSummaryLayerFromSections(cleanedRaw, tags, analysisLayer.sections);
+        if (!analysisLooksThin({ ...summaryLayer, sections: analysisLayer.sections }, cleanedRaw)) {
+            return {
+                title: summaryLayer.title,
+                summary: summaryLayer.summary,
+                entryDigest: summaryLayer.entryDigest,
+                contextBullets: summaryLayer.contextBullets,
+                sections: analysisLayer.sections,
+                exploreOptions: analysisLayer.exploreOptions,
+                feedLabels: summaryLayer.feedLabels.length
+                    ? summaryLayer.feedLabels
+                    : buildFeedLabels(tags, cleanedRaw, analysisLayer.sections),
+                patternSignals: summaryLayer.patternSignals,
+            };
+        }
     }
     const retried = await retryAnalysisWithTighterPrompt(cleanedRaw, tags);
     if (retried && !analysisLooksThin(retried, cleanedRaw))
@@ -705,7 +715,7 @@ export function simplifyPatternTitle(title) {
     if (/^the missed window story$/.test(lower))
         return 'The missed-window story';
     const shortened = clean.split(/[:(,-]/)[0]?.trim() ?? clean;
-    return clip(shortened, 42);
+    return shortened.slice(0, 72).trim();
 }
 export function chooseResurfacingCard(memoryDoc, entries, highlights) {
     const latestEntry = entries[0];
@@ -793,6 +803,153 @@ function dedupeAndRefinePatterns(patterns) {
         }
     }
     return merged;
+}
+function themeTokenSet(title) {
+    return new Set(normalizePatternTitle(title)
+        .split(' ')
+        .filter((token) => token.length > 2)
+        .filter((token) => !['how', 'and', 'with', 'from', 'into', 'your', 'that', 'this'].includes(token)));
+}
+function themeTitleSimilarity(left, right) {
+    const leftTokens = themeTokenSet(left);
+    const rightTokens = themeTokenSet(right);
+    if (!leftTokens.size || !rightTokens.size)
+        return 0;
+    let shared = 0;
+    for (const token of leftTokens) {
+        if (rightTokens.has(token))
+            shared += 1;
+    }
+    return shared / Math.max(leftTokens.size, rightTokens.size);
+}
+function buildLocalThemeCandidates(entries) {
+    const candidates = [];
+    for (const entry of entries) {
+        const sectionCandidates = entry.analysis?.sections
+            ?.filter((section) => !isGenericSectionTitle(section.title))
+            .map((section) => ({
+            title: simplifyPatternTitle(section.title),
+            evidence: firstSentence(section.content, 160) || cleanTruncatedEnding(entry.summary),
+        })) ?? [];
+        const signalCandidates = entry.analysis?.patternSignals?.map((signal) => ({
+            title: simplifyPatternTitle(signal),
+            evidence: cleanTruncatedEnding(entry.summary),
+        })) ?? [];
+        const feedLabelCandidates = entry.analysis?.feedLabels
+            ?.filter((label) => !['Work', 'Relationships', 'Identity', 'Meaning', 'Ventures', 'Decisions', 'General'].includes(label))
+            .map((label) => ({
+            title: simplifyPatternTitle(label),
+            evidence: cleanTruncatedEnding(entry.summary),
+        })) ?? [];
+        const titleCandidate = entry.title
+            ? [{
+                    title: simplifyPatternTitle(entry.title),
+                    evidence: cleanTruncatedEnding(entry.summary),
+                }]
+            : [];
+        const combined = [...sectionCandidates, ...signalCandidates, ...feedLabelCandidates, ...titleCandidate]
+            .filter((candidate) => candidate.title && candidate.evidence)
+            .slice(0, 6);
+        for (const candidate of combined) {
+            candidates.push({
+                title: candidate.title,
+                entryId: entry.id,
+                evidence: candidate.evidence,
+                createdAt: entry.createdAt,
+            });
+        }
+    }
+    return candidates;
+}
+function buildQuestionsForTheme(title) {
+    const lower = title.toLowerCase();
+    if (/permission|certainty|proof|validation|qualified|admir/.test(lower)) {
+        return [
+            'What would this look like if outside proof were not required first?',
+            'Which concrete move would test your own authority here?',
+        ];
+    }
+    if (/alignment|mission|meaning|family/.test(lower)) {
+        return [
+            'What would living this theme more fully require in practice?',
+            'Where are your stated values and daily behavior still diverging?',
+        ];
+    }
+    if (/relationship|dani|love/.test(lower)) {
+        return [
+            'What is this theme revealing about what you actually need from closeness?',
+            'What pattern keeps you adjusting to less than that?',
+        ];
+    }
+    return [
+        'What keeps this theme in place right now?',
+        'What concrete move would test a different way of operating here?',
+    ];
+}
+function buildDeterministicPatterns(entries, previousPatterns) {
+    const localCandidates = buildLocalThemeCandidates(entries);
+    const clusters = [];
+    for (const candidate of localCandidates) {
+        const existing = clusters.find((cluster) => {
+            const sameTitle = normalizePatternTitle(cluster.title) === normalizePatternTitle(candidate.title);
+            const similar = themeTitleSimilarity(cluster.title, candidate.title) >= 0.72;
+            return sameTitle || similar;
+        });
+        if (!existing) {
+            clusters.push({
+                title: candidate.title,
+                entryIds: new Set([candidate.entryId]),
+                evidence: [candidate.evidence],
+                createdAt: candidate.createdAt,
+            });
+            continue;
+        }
+        existing.entryIds.add(candidate.entryId);
+        if (!existing.evidence.includes(candidate.evidence)) {
+            existing.evidence.push(candidate.evidence);
+        }
+        if (candidate.createdAt > existing.createdAt) {
+            existing.createdAt = candidate.createdAt;
+        }
+        if (candidate.title.length > existing.title.length) {
+            existing.title = candidate.title;
+        }
+    }
+    const deterministic = clusters
+        .filter((cluster) => cluster.title && cluster.evidence.length)
+        .sort((left, right) => {
+        const rightScore = right.entryIds.size * 5 + right.evidence.length;
+        const leftScore = left.entryIds.size * 5 + left.evidence.length;
+        if (rightScore !== leftScore)
+            return rightScore - leftScore;
+        return right.createdAt.localeCompare(left.createdAt);
+    })
+        .slice(0, 8)
+        .map((cluster) => {
+        const evidence = dedupePatternLines(cluster.evidence.map((item) => cleanTruncatedEnding(item))).slice(0, 4);
+        const overview = cluster.entryIds.size > 1
+            ? `This theme shows up across ${cluster.entryIds.size} entries. Right now it centers on ${evidence[0] ?? 'a recurring tension.'}`
+            : `This theme is emerging around ${evidence[0] ?? 'a live thread in the journal.'}`;
+        return {
+            title: simplifyPatternTitle(cluster.title),
+            overview: cleanTruncatedEnding(overview),
+            dimensions: evidence,
+            questions: buildQuestionsForTheme(cluster.title),
+            exploreOptions: [
+                `Trace how ${cluster.title.toLowerCase()} evolves across entries`,
+                `Find the cost of ${cluster.title.toLowerCase()}`,
+                `Look for the next concrete move inside ${cluster.title.toLowerCase()}`,
+            ].map((item) => cleanTruncatedEnding(item)).slice(0, 3),
+            entryIds: [...cluster.entryIds],
+        };
+    });
+    return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
+        .sort((left, right) => {
+        const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0);
+        const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0);
+        return rightScore - leftScore;
+    })
+        .slice(0, 8);
 }
 function patternCoverageRatio(patterns, entries) {
     if (!entries.length)
@@ -987,6 +1144,10 @@ function reconcilePatterns(previousPatterns, nextPatterns) {
 }
 export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
     const recentEntries = entries.slice(0, 18);
+    const deterministicPatterns = buildDeterministicPatterns(recentEntries, previousPatterns);
+    if (deterministicPatterns.length >= 4 || !anthropic) {
+        return deterministicPatterns;
+    }
     const heuristics = [
         {
             id: 'pattern-validation',
@@ -1073,7 +1234,9 @@ export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
             }
         }
     }
-    return reconcilePatterns(previousPatterns, heuristicPatterns).slice(0, 9);
+    return deterministicPatterns.length
+        ? deterministicPatterns
+        : reconcilePatterns(previousPatterns, heuristicPatterns).slice(0, 9);
 }
 export async function generateReply(entry, userReply, context) {
     if (!anthropic) {

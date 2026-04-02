@@ -3,38 +3,66 @@ import { createClient } from '@supabase/supabase-js';
 import { config, hasSupabaseConfig } from '../config.js';
 import { deriveDisplaySummary, deriveDisplayTitle, simplifyPatternTitle } from './ai.js';
 import { demoConversations, demoEntries, demoHighlights, demoMemoryDoc } from './demo-data.js';
+function normalizeText(text) {
+    return text.replace(/\s+/g, ' ').trim();
+}
+function shortSentence(text, maxLength = 120) {
+    const cleaned = normalizeText(text);
+    const sentence = cleaned.split(/(?<=[.!?])\s+/)[0] ?? cleaned;
+    return sentence.length > maxLength ? `${sentence.slice(0, maxLength).trim()}` : sentence;
+}
+function isGenericSectionTitle(title) {
+    const normalized = normalizeText(title).toLowerCase();
+    return ['overview', 'core tension', 'question to sit with', 'state of affairs'].includes(normalized);
+}
+function digestFromSections(sections, summary) {
+    const derived = sections
+        .filter((section) => !isGenericSectionTitle(section.title))
+        .map((section) => {
+        const sentence = shortSentence(section.content, 105);
+        if (!sentence)
+            return section.title;
+        if (sentence.toLowerCase().startsWith(section.title.toLowerCase()))
+            return sentence;
+        return `${section.title}: ${sentence}`;
+    })
+        .filter(Boolean);
+    if (derived.length)
+        return derived.slice(0, 5);
+    return [summary].filter(Boolean);
+}
 function parseLegacyAnalysis(value, rawText) {
     if (!value || typeof value !== 'object') {
         return null;
     }
     const candidate = value;
     if (Array.isArray(candidate.sections)) {
+        const sections = candidate.sections
+            .filter((section) => section.title && section.content)
+            .map((section, index) => ({
+            id: section.id ?? `section-${index + 1}`,
+            title: section.title,
+            content: section.content,
+        }));
+        const summary = deriveDisplaySummary(candidate.summary, rawText);
         return {
             title: deriveDisplayTitle(candidate.title ?? candidate.summary, rawText, []),
-            summary: deriveDisplaySummary(candidate.summary, rawText),
-            entryDigest: [
-                deriveDisplaySummary(candidate.summary, rawText),
-                ...rawText
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter(Boolean)
-                    .slice(0, 4),
-            ].filter(Boolean).slice(0, 5),
+            summary,
+            entryDigest: digestFromSections(sections, summary),
             contextBullets: [],
-            sections: candidate.sections
-                .filter((section) => section.title && section.content)
-                .map((section, index) => ({
-                id: section.id ?? `section-${index + 1}`,
-                title: section.title,
-                content: section.content,
-            })),
+            sections,
             exploreOptions: candidate.exploreOptions ?? [],
             feedLabels: candidate.feedLabels ??
-                candidate.sections
+                sections
                     .map((section) => section.title)
                     .filter((title) => Boolean(title))
                     .slice(0, 3),
-            patternSignals: candidate.patternSignals ?? [],
+            patternSignals: candidate.patternSignals?.length
+                ? candidate.patternSignals
+                : sections
+                    .map((section) => section.title)
+                    .filter((title) => !isGenericSectionTitle(title))
+                    .slice(0, 4),
         };
     }
     const legacySections = [
@@ -54,14 +82,7 @@ function parseLegacyAnalysis(value, rawText) {
     return {
         title: deriveDisplayTitle(candidate.title ?? candidate.summary ?? candidate.restate, rawText, []),
         summary: deriveDisplaySummary(candidate.summary ?? candidate.restate, rawText),
-        entryDigest: [
-            deriveDisplaySummary(candidate.summary ?? candidate.restate, rawText),
-            ...rawText
-                .split('\n')
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .slice(0, 4),
-        ].filter(Boolean).slice(0, 5),
+        entryDigest: digestFromSections(legacySections.map((section) => ({ title: section.title, content: section.content })), deriveDisplaySummary(candidate.summary ?? candidate.restate, rawText)),
         contextBullets: [],
         sections: legacySections,
         exploreOptions: [
