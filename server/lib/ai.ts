@@ -688,7 +688,10 @@ function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'up
     const existing = merged.find((candidate) => {
       const titleScore = normalizePatternTitle(candidate.title) === normalizePatternTitle(pattern.title)
       const sharedEntries = pattern.entryIds.filter((entryId) => candidate.entryIds.includes(entryId)).length
-      return titleScore || sharedEntries >= Math.min(2, pattern.entryIds.length)
+      const sharedDimension = pattern.dimensions.some((dimension) =>
+        candidate.dimensions.some((existingDimension) => normalizePatternTitle(existingDimension) === normalizePatternTitle(dimension)),
+      )
+      return titleScore || (sharedEntries >= 2 && sharedDimension)
     })
 
     if (!existing) {
@@ -759,7 +762,7 @@ export async function buildPatterns(
   entries: JournalEntry[],
   previousPatterns: PatternSection[] = [],
 ): Promise<PatternSection[]> {
-  const recentEntries = entries.slice(0, 14)
+  const recentEntries = entries.slice(0, 18)
   const heuristics = [
     {
       id: 'pattern-validation',
@@ -788,10 +791,10 @@ export async function buildPatterns(
     })
     .filter((item) => item.matched.length)
 
-  const heuristicPatterns = heuristicMatches.slice(0, 4).map(({ heuristic, matched }) => ({
+  const heuristicPatterns = heuristicMatches.slice(0, 6).map(({ heuristic, matched }) => ({
     title: heuristic.title,
     overview: matched[0]?.summary ?? buildSummary(matched[0]?.rawText ?? ''),
-    dimensions: matched.slice(0, 3).map((entry) => entry.summary),
+    dimensions: matched.slice(0, 4).map((entry) => entry.summary),
     questions: [heuristic.question],
     exploreOptions: [`Trace how "${heuristic.title.toLowerCase()}" has evolved across entries`],
     entryIds: matched.map((entry) => entry.id),
@@ -813,7 +816,8 @@ Return JSON only:
 
 Rules:
 - Return the real set of important themes. Do not target a number for its own sake.
-- For 10+ entries, prefer a richer map. Usually 5 to 8 themes is better than 2 or 3 giant umbrellas if the material supports it.
+- For 10+ entries, prefer a richer map. Usually 5 to 9 themes is better than 2 or 3 giant umbrellas if the material supports it.
+- If there are 13+ entries and the material clearly supports it, returning only 2 or 3 themes is usually too collapsed.
 - Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
 - Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
 - Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
@@ -823,6 +827,7 @@ Rules:
 - Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
 - If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
 - It is okay to include smaller, more specific emerging themes if they reveal an important live thread.
+- The same entry can support multiple themes. Shared supporting entries are allowed when distinct mechanisms are present.
 - Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
 - Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
 - Themes can vary in depth.
@@ -841,12 +846,13 @@ Rules:
 - If a line is already an observation, do not rewrite it as a fake question.
 - Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
 - Use the full spread of entries below. Do not anchor only on the dominant repeated theme if other meaningful threads are present.
+- Treat entry digests and section titles as evidence of distinct subthreads. Use them to split apart different live mechanisms instead of over-collapsing.
 
 Memory:
 ${memoryForPrompt(memoryDoc, 1800)}
 
 Entries:
-${patternEntriesForPrompt(recentEntries, 14)}
+${patternEntriesForPrompt(recentEntries, 18)}
 
 Existing themes to preserve when still active:
 ${previousPatternsForPrompt(previousPatterns)}
@@ -854,7 +860,7 @@ ${previousPatternsForPrompt(previousPatterns)}
 
     const response = await anthropic.messages.create({
       model: config.anthropicModel,
-      max_tokens: 1400,
+      max_tokens: 1800,
       messages: [{ role: 'user', content: prompt }],
     })
 
@@ -900,19 +906,26 @@ ${previousPatternsForPrompt(previousPatterns)}
               heuristicPattern.entryIds.some((entryId) => pattern.entryIds.includes(entryId)),
           )
 
-          if (!overlapsExisting && paddedPatterns.length < 2) {
+          if (!overlapsExisting && paddedPatterns.length < 5) {
             paddedPatterns.push(heuristicPattern)
           }
         }
 
-        return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))
+        const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))
+        return reconciled
+          .sort((left, right) => {
+            const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
+            const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
+            return rightScore - leftScore
+          })
+          .slice(0, 9)
       }
     } catch {
       // Fall through to heuristic build.
     }
   }
 
-  return reconcilePatterns(previousPatterns, heuristicPatterns)
+  return reconcilePatterns(previousPatterns, heuristicPatterns).slice(0, 9)
 }
 
 export async function generateReply(
