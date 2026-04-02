@@ -1003,7 +1003,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'relationship-attunement',
     title: 'Attunement as requirement',
-    test: /dani|attun|expressive love|felt love|closeness|want a partner who|relationship reflection/i,
+    test: /attun|expressive love|felt love|want a partner who|relationship reflection|(?=.*\bdani\b)(?=.*\b(love|felt|attun|partner|relationship)\b)/i,
     questions: [
       'What does this reveal about the kind of attunement you actually need?',
       'Where do you keep translating that need into something smaller or safer?',
@@ -1021,7 +1021,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'family-mission',
     title: 'Family as mission',
-    test: /family|build toward family|mission of my life/i,
+    test: /\bbuild(?:ing)? (?:a )?family\b|\bprioritize (?:building )?(?:a )?family\b|\bfamily as mission\b|\bmission of my life\b|\bbuild(?:ing)? toward family\b/i,
     questions: [
       'What would building toward family require now, not someday?',
       'How does this aspiration change the way you want to organize your life?',
@@ -1030,7 +1030,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'alignment-drift',
     title: 'Distance from alignment',
-    test: /alignment|surrender|meaning|mission|surrender period/i,
+    test: /\balignment\b|\bsurrender\b|\bmisalign(?:ment|ed)?\b|\bdistance from (?:alignment|that early surrender)\b|\bsurrender period\b/i,
     questions: [
       'What conditions seem to move you closer to alignment in practice?',
       'What keeps pulling you into a mode that feels misaligned?',
@@ -1048,7 +1048,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'output-anchor',
     title: 'Output as anchor',
-    test: /output|produce|producing|consuming|ship|shipping|trace|deliver/i,
+    test: /\boutput\b|\bproduc(?:e|ing|tion)\b|\bconsum(?:e|ing|ption)\b|\bship(?:s|ped|ping)?\b|\bdeliver(?:ed|ing)?\b|\bsomething to ship\b/i,
     questions: [
       'What kind of output would make the day feel real to you?',
       'Where are you substituting motion or consumption for something shippable?',
@@ -1066,7 +1066,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'outward-proof',
     title: 'Looking outward for proof',
-    test: /admired|proof|validation|recognized|someone else want|borrow(?:ing)? certainty|yoni|elie/i,
+    test: /\badmired\b|\bproof\b|\bvalidation\b|\brecognized\b|\bsomeone else want\b|\bborrow(?:ing)? certainty\b|\bchecking outward\b|\bexternal validation\b|\bidealiz(?:e|ed|ation)\b/i,
     questions: [
       'Where are you still treating another person as evidence that your desire is legitimate?',
       'What would shift if you stopped outsourcing conviction here?',
@@ -1075,7 +1075,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'certainty-delay',
     title: 'Waiting for certainty',
-    test: /certainty|clarity|waiting|hesitat|delay|stuck|before visible action|visible action|legitimi[sz]e/i,
+    test: /\bcertainty\b|\bclarity\b|\bwait(?:ing)?\b|\bhesitat(?:e|ion|ing)?\b|\bdelay(?:ed|ing)?\b|\bbefore visible action\b|\bvisible action\b|\blegitimi[sz]e\b/i,
     questions: [
       'What concrete move would create more information than more reflection?',
       'What are you hoping certainty will spare you from feeling?',
@@ -1084,7 +1084,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'missed-window',
     title: 'The missed-window story',
-    test: /regret|missed|earlier|timing|window|8 years|5 years|not acting earlier|closed opportunities/i,
+    test: /\bregret\b|\bmissed\b|\bearlier\b|\btiming\b|\bwindow\b|\b8 years\b|\b5 years\b|\bnot acting earlier\b|\bclosed opportunities\b/i,
     questions: [
       'How much of this story is useful learning, and how much is self-punishment?',
       'What present-day move would keep this from becoming the next missed window?',
@@ -1222,7 +1222,6 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
       ...splitIntoCandidateSentences(entry.rawText),
       ...buildSourceMoments(entry.rawText, 8),
       entry.summary,
-      ...(entry.analysis?.entryDigest ?? []),
     ]
       .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
       .filter(Boolean)
