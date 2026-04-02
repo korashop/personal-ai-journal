@@ -10,7 +10,7 @@ function clipForPrompt(text, maxLength) {
     const cleaned = normalizeWhitespace(text);
     return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength).trim()}...` : cleaned;
 }
-function clipLongEntryForAnalysis(text, maxLength = 12000) {
+function clipLongEntryForAnalysis(text, maxLength = 8000) {
     const cleaned = sanitizeJournalText(text);
     if (cleaned.length <= maxLength)
         return cleaned;
@@ -330,13 +330,13 @@ ${malformedResponse}`;
 }
 export async function generateAnalysis(rawText, tags, context) {
     const cleanedRaw = sanitizeJournalText(rawText) || rawText;
-    const analysisEntryText = clipLongEntryForAnalysis(cleanedRaw, 12000);
+    const analysisEntryText = clipLongEntryForAnalysis(cleanedRaw, 8000);
     const isLongEntry = cleanedRaw.length > 9000;
     if (!anthropic) {
         return fallbackAnalysis(cleanedRaw, tags);
     }
-    const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 3 : 4, isLongEntry ? 140 : 180);
-    const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 120 : 150);
+    const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 2 : 4, isLongEntry ? 120 : 180);
+    const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 90 : 150);
     const prompt = `You are a direct, highly useful thinking partner with cumulative memory.
 Never congratulate the user for journaling.
 Do not force a fixed structure if the entry does not need it.
@@ -368,7 +368,7 @@ Rules:
 - If you notice a change between the beginning, middle, and end, include that movement in the analysis.
 
 Memory doc:
-${memoryForPrompt(context.memoryDoc, isLongEntry ? 1400 : 2400)}
+${memoryForPrompt(context.memoryDoc, isLongEntry ? 800 : 2400)}
 
 Recent entries:
 ${recentEntryLines}
@@ -383,7 +383,7 @@ New entry:
 ${analysisEntryText}`;
     const response = await anthropic.messages.create({
         model: config.anthropicModel,
-        max_tokens: isLongEntry ? 2200 : 1600,
+        max_tokens: isLongEntry ? 1400 : 1600,
         messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content

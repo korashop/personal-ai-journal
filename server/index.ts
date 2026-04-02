@@ -117,17 +117,11 @@ app.get('/api/bootstrap', async (request, response, next) => {
     const { mode, store } = getStore()
     const selectedEntryId = typeof request.query.entryId === 'string' ? request.query.entryId : null
     const data = await store.getBootstrap(config.demoUserId, selectedEntryId)
-    const hasTruncatedPattern = data.patterns.some((pattern) =>
-      /\.{3,}\s*$/.test(pattern.overview) ||
-      pattern.dimensions.some((dimension) => /\.{3,}\s*$/.test(dimension)) ||
-      pattern.questions.some((question) => /\.{3,}\s*$/.test(question)),
-    )
-    const shouldRebuildPatterns = !data.patterns.length || hasTruncatedPattern
-    const patterns = shouldRebuildPatterns
-      ? await buildPatterns(data.memoryDoc, data.patternEntries, data.patterns)
-      : data.patterns
+    const patterns = data.patterns.length
+      ? data.patterns
+      : await buildPatterns(data.memoryDoc, data.patternEntries, [])
 
-    if (shouldRebuildPatterns && patterns.length) {
+    if (!data.patterns.length && patterns.length) {
       void store.updatePatterns(config.demoUserId, patterns)
     }
 
