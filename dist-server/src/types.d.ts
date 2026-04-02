@@ -20,6 +20,7 @@ export type AnalysisPayload = {
     sections: AnalysisSection[];
     exploreOptions: string[];
     feedLabels: string[];
+    patternSignals?: string[];
 };
 export type EntryRecord = {
     id: string;

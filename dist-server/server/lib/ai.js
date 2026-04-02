@@ -48,6 +48,16 @@ function slugify(text) {
 function normalizeWhitespace(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
+function cleanTruncatedEnding(text) {
+    const normalized = text.trim().replace(/[.…]+\s*$/, '').trim();
+    if (!normalized)
+        return '';
+    const lastSentenceBoundary = Math.max(normalized.lastIndexOf('. '), normalized.lastIndexOf('? '), normalized.lastIndexOf('! '));
+    if (lastSentenceBoundary >= 0 && normalized.length - lastSentenceBoundary > 140) {
+        return normalized.slice(0, lastSentenceBoundary + 1).trim();
+    }
+    return normalized;
+}
 function stripMarkdown(text) {
     return text
         .replace(/[*_`>#-]+/g, ' ')
@@ -169,42 +179,46 @@ export function buildSummary(rawText) {
     return clip(firstTwoSentences, 180);
 }
 function buildContextBullets(rawText) {
-    const cleaned = buildAnalysisInput(rawText)
-        .split('\n')
+    return buildSourceMoments(rawText, 6)
+        .slice(0, 3)
+        .map((line) => clip(line, 120));
+}
+function splitIntoCandidateSentences(rawText) {
+    return buildAnalysisInput(rawText)
+        .replace(/\n+/g, ' ')
+        .split(/(?<=[.!?])\s+|\s+(?=\d+\)\s)|\s+(?=[-•]\s)/)
         .map((line) => normalizeWhitespace(line))
+        .map((line) => line.replace(/^\d+\)\s*/, ''))
+        .map((line) => line.replace(/^[-•]\s*/, ''))
         .filter(Boolean)
-        .filter((line) => !looksLikeScaffolding(line));
-    return cleaned.slice(0, 3).map((line) => clip(line, 120));
+        .filter((line) => !looksLikeScaffolding(line))
+        .filter((line) => line.length > 18);
+}
+function buildSourceMoments(rawText, maxItems = 5) {
+    const sentences = splitIntoCandidateSentences(rawText);
+    if (!sentences.length)
+        return [];
+    if (sentences.length <= maxItems) {
+        return sentences.map((line) => clip(line, 130));
+    }
+    const selected = [];
+    for (let index = 0; index < maxItems; index += 1) {
+        const position = Math.round((index / Math.max(maxItems - 1, 1)) * (sentences.length - 1));
+        const sentence = sentences[position];
+        if (!sentence)
+            continue;
+        if (selected.some((existing) => normalizeWhitespace(existing).toLowerCase() === normalizeWhitespace(sentence).toLowerCase())) {
+            continue;
+        }
+        selected.push(clip(sentence, 130));
+    }
+    return selected;
 }
 function buildEntryDigest(rawText) {
-    const cleaned = buildAnalysisInput(rawText)
-        .split('\n')
-        .map((line) => normalizeWhitespace(line))
-        .filter(Boolean)
-        .filter((line) => !looksLikeScaffolding(line));
-    if (cleaned.length <= 5) {
-        return cleaned.slice(0, 5).map((line) => clip(line, 140));
-    }
-    const picks = [];
-    const targetCount = Math.min(6, cleaned.length);
-    for (let index = 0; index < targetCount; index += 1) {
-        const position = Math.round((index / Math.max(targetCount - 1, 1)) * (cleaned.length - 1));
-        const line = cleaned[position];
-        if (line) {
-            picks.push(line);
-        }
-    }
-    const deduped = [];
-    for (const line of picks) {
-        const normalized = normalizeWhitespace(line).toLowerCase();
-        if (deduped.some((existing) => normalizeWhitespace(existing).toLowerCase() === normalized))
-            continue;
-        deduped.push(line);
-    }
-    return deduped.slice(0, 5).map((line) => clip(line, 140));
+    return buildSourceMoments(rawText, 5).map((line) => clip(line, 140));
 }
 function looksAbstractDigestLine(line) {
-    const normalized = normalizeWhitespace(stripMarkdown(line)).toLowerCase();
+    const normalized = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(line))).toLowerCase();
     return (/^the\s+\w+\s+that\s+\w+/.test(normalized) ||
         normalized.includes('tension') ||
         normalized.includes('thread') ||
@@ -212,12 +226,12 @@ function looksAbstractDigestLine(line) {
         normalized.includes('dynamic'));
 }
 function finalizeEntryDigest(candidateLines, rawText) {
-    const sourceLines = buildEntryDigest(rawText);
     const aiLines = (candidateLines ?? [])
-        .map((line) => line.trim())
+        .map((line) => cleanTruncatedEnding(line))
         .filter(Boolean)
         .filter((line) => !looksAbstractDigestLine(line));
-    const merged = [...sourceLines, ...aiLines];
+    const sourceLines = buildEntryDigest(rawText);
+    const merged = [...aiLines, ...sourceLines];
     const deduped = [];
     for (const line of merged) {
         const normalized = normalizeWhitespace(line).toLowerCase();
@@ -277,10 +291,10 @@ ${malformedResponse}`;
         .filter((item) => item.title && item.overview)
         .map((item) => ({
         title: simplifyPatternTitle(item.title.trim()),
-        overview: item.overview.trim(),
-        dimensions: (item.dimensions ?? []).map((signal) => signal.trim()).filter(Boolean),
-        questions: (item.questions ?? []).map((question) => question.trim()).filter(Boolean),
-        exploreOptions: (item.exploreOptions ?? []).map((option) => option.trim()).filter(Boolean).slice(0, 4),
+        overview: cleanTruncatedEnding(item.overview),
+        dimensions: (item.dimensions ?? []).map((signal) => cleanTruncatedEnding(signal)).filter(Boolean),
+        questions: (item.questions ?? []).map((question) => cleanTruncatedEnding(question)).filter(Boolean),
+        exploreOptions: (item.exploreOptions ?? []).map((option) => cleanTruncatedEnding(option)).filter(Boolean).slice(0, 4),
         entryIds: (item.entryIds ?? []).filter(Boolean),
     }));
 }
@@ -296,7 +310,8 @@ Return JSON only with this shape:
   "contextBullets": ["short source-context bullet"],
   "sections": [{ "title": "string", "content": "markdown string" }],
   "exploreOptions": ["string"],
-  "feedLabels": ["string"]
+  "feedLabels": ["string"],
+  "patternSignals": ["short recurring mechanism or live thread"]
 }
 
 Rules:
@@ -307,6 +322,8 @@ Rules:
 - Do not end sections with ellipses or fragments.
 - Do not use generic headings like Overview unless truly necessary.
 - Account for the full spread of the entry, not just the beginning.
+- Keep every field concise. No entryDigest or context bullet should be a pasted paragraph.
+- patternSignals should be 2 to 4 short mechanism-level phrases that may recur across entries.
 
 Entry:
 ${clipLongEntryForAnalysis(rawText, 7000)}`;
@@ -327,7 +344,7 @@ ${clipLongEntryForAnalysis(rawText, 7000)}`;
         .map((section, index) => ({
         id: `retry-section-${index + 1}`,
         title: section.title.trim(),
-        content: section.content.trim(),
+        content: cleanTruncatedEnding(section.content),
     }));
     if (!sections.length)
         return null;
@@ -336,10 +353,11 @@ ${clipLongEntryForAnalysis(rawText, 7000)}`;
         title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), rawText, tags),
         summary: deriveDisplaySummary(parsed.summary?.trim(), rawText),
         entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
-        contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
+        contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
         sections,
-        exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+        exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
         feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, rawText, sections),
+        patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
     };
 }
 function memoryForPrompt(memoryDoc, maxLength = 2400) {
@@ -361,9 +379,11 @@ function patternEntriesForPrompt(entries, maxEntries = 8) {
     return entries
         .slice(0, maxEntries)
         .map((entry) => {
-        const digest = entry.analysis?.entryDigest?.slice(0, 3).join(' / ') ?? '';
+        const digest = buildEntryDigest(entry.rawText).slice(0, 3).join(' / ');
+        const moments = buildSourceMoments(entry.rawText, 4).join(' / ');
         const sectionTitles = entry.analysis?.sections?.map((section) => section.title).slice(0, 4).join(', ') ?? '';
-        return `- ${entry.id} | ${clipForPrompt(entry.title, 70)} | ${clipForPrompt(entry.summary, 170)} | digest: ${clipForPrompt(digest || 'None', 220)} | sections: ${clipForPrompt(sectionTitles || 'None', 120)} | tags: ${entry.tags.join(', ')}`;
+        const patternSignals = entry.analysis?.patternSignals?.slice(0, 4).join(', ') ?? '';
+        return `- ${entry.id} | ${clipForPrompt(entry.title, 70)} | ${clipForPrompt(entry.summary, 170)} | moments: ${clipForPrompt(moments || 'None', 260)} | digest: ${clipForPrompt(digest || 'None', 220)} | sections: ${clipForPrompt(sectionTitles || 'None', 120)} | signals: ${clipForPrompt(patternSignals || 'None', 160)} | tags: ${entry.tags.join(', ')}`;
     })
         .join('\n');
 }
@@ -445,12 +465,13 @@ function fallbackAnalysis(rawText, tags) {
             'Turn this into one concrete next question',
         ],
         feedLabels: buildFeedLabels(tags, rawText, sections),
+        patternSignals: tags.slice(0, 3),
     };
 }
 function analysisLooksThin(candidate, rawText) {
     const totalSectionLength = candidate.sections.reduce((sum, section) => sum + section.content.length, 0);
     const longEntry = rawText.length > 7000;
-    const hasTruncation = candidate.sections.some((section) => /\.{3,}\s*$/.test(section.content.trim()));
+    const hasTruncation = candidate.sections.some((section) => /(?:\.{3,}|…)\s*$/.test(section.content.trim()));
     const digestCount = (candidate.entryDigest ?? []).filter(Boolean).length;
     const contextCount = (candidate.contextBullets ?? []).filter(Boolean).length;
     if (hasTruncation)
@@ -479,7 +500,8 @@ Use this exact shape:
   "contextBullets": ["short source-context bullet"],
   "sections": [{ "title": "string", "content": "markdown string" }],
   "exploreOptions": ["string"],
-  "feedLabels": ["string"]
+  "feedLabels": ["string"],
+  "patternSignals": ["short recurring mechanism or live thread"]
 }
 
 Rules:
@@ -509,7 +531,7 @@ ${malformedResponse}`;
         .map((section, index) => ({
         id: `repair-section-${index + 1}`,
         title: section.title.trim(),
-        content: section.content.trim(),
+        content: cleanTruncatedEnding(section.content),
     }));
     if (!sections.length)
         return null;
@@ -518,10 +540,11 @@ ${malformedResponse}`;
         title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), rawText, tags),
         summary: deriveDisplaySummary(parsed.summary?.trim(), rawText),
         entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
-        contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
+        contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
         sections,
-        exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+        exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
         feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, rawText, sections),
+        patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
     };
 }
 export async function generateAnalysis(rawText, tags, context) {
@@ -531,8 +554,8 @@ export async function generateAnalysis(rawText, tags, context) {
     if (!anthropic) {
         return fallbackAnalysis(cleanedRaw, tags);
     }
-    const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 2 : 4, isLongEntry ? 120 : 180);
-    const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 90 : 150);
+    const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 1 : 4, isLongEntry ? 100 : 180);
+    const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 80 : 150);
     const prompt = `You are a direct, highly useful thinking partner with cumulative memory.
 Never congratulate the user for journaling.
 Do not force a fixed structure if the entry does not need it.
@@ -546,7 +569,8 @@ Return JSON only with this shape:
     { "title": "string", "content": "markdown string" }
   ],
   "exploreOptions": ["3 to 5 clickable directions to explore next"],
-  "feedLabels": ["2 to 3 compact thematic labels for the entry list"]
+  "feedLabels": ["2 to 3 compact thematic labels for the entry list"],
+  "patternSignals": ["2 to 4 short recurring mechanisms or live threads"]
 }
 
 Rules:
@@ -559,16 +583,20 @@ Rules:
 - The summary should help the user recognize what this entry is actually about later, in 1 or 2 sentences max.
 - The entryDigest should be the fastest honest answer to "what came up here?" Use it for distinct topics, scenes, decisions, or people mentioned.
 - Keep entryDigest concrete and source-grounded. Mention real names, projects, places, or decisions when they appear.
+- Every entryDigest bullet must stand alone as a short summary bullet, not copied prose from the entry.
 - Do not use abstract bullets like "the tension" or "the mechanism" when a more concrete bullet is possible.
 - Context bullets should be short, concrete, and source-oriented. Think "what was happening / what was being wrestled with", not interpretation.
+- No context bullet should exceed one sentence.
 - Do not simply restate the first section in shorter form.
 - Explore options should feel like meaningful next angles, not generic prompts.
 - Feed labels should be short and useful, not broad buckets unless those are genuinely the right level.
+- patternSignals should name recurring mechanisms or active live threads in 2 to 6 words each.
 - If the entry is long, account for the whole thing. Do not analyze only the beginning and ignore later turns.
 - If you notice a change between the beginning, middle, and end, include that movement in the analysis.
 - If the entry contains multiple unrelated or loosely related threads, separate them. Do not force them into one coherent narrative unless the relationship is actually clear.
 - Use section titles that reflect distinct threads, not generic therapy headings.
 - Inside sections, prefer short paragraphs and bullets when that makes the thinking easier to scan without losing depth.
+- Never end any field with ellipses.
 
 Memory doc:
 ${memoryForPrompt(context.memoryDoc, isLongEntry ? 800 : 2400)}
@@ -583,10 +611,13 @@ Tags:
 ${tags.join(', ') || 'None'}
 
 New entry:
-${analysisEntryText}`;
+${analysisEntryText}
+
+Concrete source moments:
+${buildSourceMoments(cleanedRaw, 7).map((item) => `- ${item}`).join('\n') || 'None'}`;
     const response = await anthropic.messages.create({
         model: config.anthropicModel,
-        max_tokens: isLongEntry ? 1400 : 1600,
+        max_tokens: isLongEntry ? 1100 : 1500,
         messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content
@@ -600,7 +631,7 @@ ${analysisEntryText}`;
             .map((section, index) => ({
             id: `section-${index + 1}`,
             title: section.title.trim(),
-            content: section.content.trim(),
+            content: cleanTruncatedEnding(section.content),
         }));
         if (sections.length && !analysisLooksThin({ ...parsed, sections }, cleanedRaw)) {
             const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3);
@@ -608,10 +639,11 @@ ${analysisEntryText}`;
                 title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), cleanedRaw, tags),
                 summary: deriveDisplaySummary(parsed.summary?.trim(), cleanedRaw),
                 entryDigest: finalizeEntryDigest(parsed.entryDigest, cleanedRaw),
-                contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
+                contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
                 sections,
-                exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+                exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
                 feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, cleanedRaw, sections),
+                patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
             };
         }
     }
@@ -751,10 +783,10 @@ function dedupeAndRefinePatterns(patterns) {
         if (!existing) {
             merged.push({
                 ...pattern,
-                overview: pattern.overview.replace(/\.{3,}$/, '.').trim(),
-                dimensions: dedupePatternLines(pattern.dimensions, pattern.overview).slice(0, 4),
-                questions: dedupePatternLines(pattern.questions, `${pattern.overview}\n${pattern.dimensions.join('\n')}`).slice(0, 3),
-                exploreOptions: dedupePatternLines(pattern.exploreOptions).slice(0, 3),
+                overview: cleanTruncatedEnding(pattern.overview),
+                dimensions: dedupePatternLines(pattern.dimensions.map(cleanTruncatedEnding), pattern.overview).slice(0, 4),
+                questions: dedupePatternLines(pattern.questions.map(cleanTruncatedEnding), `${pattern.overview}\n${pattern.dimensions.join('\n')}`).slice(0, 3),
+                exploreOptions: dedupePatternLines(pattern.exploreOptions.map(cleanTruncatedEnding)).slice(0, 3),
             });
             continue;
         }
@@ -763,7 +795,7 @@ function dedupeAndRefinePatterns(patterns) {
         existing.questions = dedupePatternLines([...existing.questions, ...pattern.questions], `${existing.overview}\n${existing.dimensions.join('\n')}`).slice(0, 3);
         existing.exploreOptions = dedupePatternLines([...existing.exploreOptions, ...pattern.exploreOptions]).slice(0, 3);
         if (pattern.overview.length > existing.overview.length) {
-            existing.overview = pattern.overview.replace(/\.{3,}$/, '.').trim();
+            existing.overview = cleanTruncatedEnding(pattern.overview);
             existing.title = simplifyPatternTitle(pattern.title);
         }
     }
@@ -776,12 +808,14 @@ function patternCoverageRatio(patterns, entries) {
     return coveredIds.size / entries.length;
 }
 function looksTruncatedPatternText(text) {
-    return /\.{3,}\s*$/.test(text.trim());
+    return /(?:\.{3,}|…)\s*$/.test(text.trim());
 }
-function shouldForcePatternExpansion(patterns, entries) {
+function shouldForcePatternExpansion(patterns, entries, candidateCount = 0) {
     if (!entries.length)
         return false;
     if (entries.length >= 10 && patterns.length <= 3)
+        return true;
+    if (candidateCount >= 8 && patterns.length <= 4)
         return true;
     if (entries.length >= 12 && patternCoverageRatio(patterns, entries) < 0.72)
         return true;
@@ -789,7 +823,7 @@ function shouldForcePatternExpansion(patterns, entries) {
         pattern.dimensions.some(looksTruncatedPatternText) ||
         pattern.questions.some(looksTruncatedPatternText));
 }
-async function synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, options) {
+async function synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, patternCandidates, options) {
     if (!anthropic || !recentEntries.length)
         return null;
     const continuityPatterns = options?.expandAggressively && previousPatterns.length <= 3 && recentEntries.length >= 10
@@ -841,6 +875,9 @@ Rules:
 - Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
 - Use the full spread of entries below. Do not anchor only on the dominant repeated theme if other meaningful threads are present.
 - Treat entry digests and section titles as evidence of distinct subthreads. Use them to split apart different live mechanisms instead of over-collapsing.
+- Keep overviews to 1 or 2 complete sentences max.
+- Keep each dimension and question to one sentence max.
+- Never use ellipses.
 ${options?.expandAggressively ? '- The current map is too collapsed. Replace stale umbrella themes with a fuller map if the evidence supports it.' : ''}
 
 Memory:
@@ -848,6 +885,13 @@ ${memoryForPrompt(memoryDoc, options?.expandAggressively ? 1400 : 1800)}
 
 Entries:
 ${patternEntriesForPrompt(recentEntries, 18)}
+
+Candidate recurring threads:
+${patternCandidates.length
+        ? patternCandidates
+            .map((candidate) => `- ${candidate.title} | entries: ${candidate.entryIds.join(', ')} | evidence: ${candidate.evidence.join(' / ')}`)
+            .join('\n')
+        : 'None'}
 
 Existing themes to preserve when still active:
 ${previousPatternsForPrompt(continuityPatterns)}`;
@@ -867,13 +911,59 @@ ${previousPatternsForPrompt(continuityPatterns)}`;
             .filter((item) => item.title && item.overview)
             .map((item) => ({
             title: simplifyPatternTitle(item.title.trim()),
-            overview: item.overview.trim(),
-            dimensions: (item.dimensions ?? []).map((signal) => signal.trim()).filter(Boolean),
-            questions: (item.questions ?? []).map((question) => question.trim()).filter(Boolean),
-            exploreOptions: (item.exploreOptions ?? []).map((option) => option.trim()).filter(Boolean).slice(0, 4),
+            overview: cleanTruncatedEnding(item.overview),
+            dimensions: (item.dimensions ?? []).map((signal) => cleanTruncatedEnding(signal)).filter(Boolean),
+            questions: (item.questions ?? []).map((question) => cleanTruncatedEnding(question)).filter(Boolean),
+            exploreOptions: (item.exploreOptions ?? []).map((option) => cleanTruncatedEnding(option)).filter(Boolean).slice(0, 4),
             entryIds: (item.entryIds ?? []).filter(Boolean),
         })),
     };
+}
+async function extractPatternCandidates(memoryDoc, recentEntries) {
+    if (!anthropic || !recentEntries.length)
+        return [];
+    const prompt = `Extract candidate recurring threads from this journal history.
+Return JSON only:
+[
+  {
+    "title": "short mechanism or live thread",
+    "entryIds": ["entry id"],
+    "evidence": ["concrete observation from the journal"]
+  }
+]
+
+Rules:
+- Return 8 to 14 candidate threads when the material supports it.
+- Prefer concrete recurring mechanisms, tensions, or active live threads.
+- Avoid umbrella categories like "work" or "relationships" by themselves.
+- A candidate can be emerging and only have 1 or 2 entries if it feels clearly alive.
+- Do not collapse distinct threads into one broad title.
+- Titles should be 2 to 6 words, plain English.
+- Evidence lines should be concrete, short, and not end with ellipses.
+- Use only the entry IDs provided below.
+
+Memory:
+${memoryForPrompt(memoryDoc, 1200)}
+
+Entries:
+${patternEntriesForPrompt(recentEntries, 18)}`;
+    const response = await anthropic.messages.create({
+        model: config.anthropicModel,
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: prompt }],
+    });
+    const text = response.content
+        .filter((item) => item.type === 'text')
+        .map((item) => item.text)
+        .join('\n');
+    const parsed = parseJsonFromText(text);
+    return (parsed ?? [])
+        .filter((item) => item.title && item.entryIds?.length)
+        .map((item) => ({
+        title: simplifyPatternTitle(item.title.trim()),
+        entryIds: (item.entryIds ?? []).filter(Boolean),
+        evidence: (item.evidence ?? []).map((line) => cleanTruncatedEnding(line)).filter(Boolean).slice(0, 3),
+    }));
 }
 function reconcilePatterns(previousPatterns, nextPatterns) {
     const timestamp = new Date().toISOString();
@@ -941,12 +1031,13 @@ export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
     if (anthropic && entries.length) {
         let rawPatternText = '';
         try {
-            const synthesized = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns);
+            const patternCandidates = await extractPatternCandidates(memoryDoc, recentEntries);
+            const synthesized = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, patternCandidates);
             rawPatternText = synthesized?.rawText ?? '';
             if (synthesized?.patterns.length) {
                 let paddedPatterns = dedupeAndRefinePatterns(synthesized.patterns);
-                if (shouldForcePatternExpansion(paddedPatterns, recentEntries)) {
-                    const expanded = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, {
+                if (shouldForcePatternExpansion(paddedPatterns, recentEntries, patternCandidates.length)) {
+                    const expanded = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, patternCandidates, {
                         expandAggressively: true,
                     }).catch(() => null);
                     if (expanded?.patterns.length) {

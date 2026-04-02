@@ -1128,17 +1128,6 @@ button {
   line-height: 1.6;
 }
 
-.pattern-home-signals {
-  margin: 0;
-  padding-left: 1.15rem;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
-.pattern-home-signals li {
-  margin-bottom: 0.32rem;
-}
-
 .pattern-home-meta,
 .pattern-detail-meta {
   display: flex;

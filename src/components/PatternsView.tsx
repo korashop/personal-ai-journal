@@ -253,13 +253,6 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                     <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
                   </div>
                   <p className="pattern-home-preview">{pattern.overview}</p>
-                  {pattern.dimensions.length ? (
-                    <ul className="pattern-home-signals">
-                      {pattern.dimensions.slice(0, 2).map((dimension) => (
-                        <li key={dimension}>{dimension}</li>
-                      ))}
-                    </ul>
-                  ) : null}
                   <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                 </button>
               ))}

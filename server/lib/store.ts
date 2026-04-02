@@ -71,6 +71,7 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
     sections?: Array<{ id?: string; title?: string; content?: string }>
     exploreOptions?: string[]
     feedLabels?: string[]
+    patternSignals?: string[]
     restate?: string
     underneath?: string
     challenge?: string
@@ -104,6 +105,7 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
           .map((section) => section.title)
           .filter((title): title is string => Boolean(title))
           .slice(0, 3),
+      patternSignals: candidate.patternSignals ?? [],
     }
   }
 
@@ -142,6 +144,7 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
       'Turn this into one concrete next question',
     ],
     feedLabels: legacySections.map((section) => section.title).slice(0, 3),
+    patternSignals: [],
   }
 }
 

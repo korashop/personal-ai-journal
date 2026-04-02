@@ -12,6 +12,7 @@ export type AnalysisPayload = {
     sections: AnalysisSection[];
     exploreOptions: string[];
     feedLabels: string[];
+    patternSignals?: string[];
 };
 export type JournalEntry = {
     id: string;

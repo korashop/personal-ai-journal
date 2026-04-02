@@ -34,6 +34,7 @@ function parseLegacyAnalysis(value, rawText) {
                     .map((section) => section.title)
                     .filter((title) => Boolean(title))
                     .slice(0, 3),
+            patternSignals: candidate.patternSignals ?? [],
         };
     }
     const legacySections = [
@@ -69,6 +70,7 @@ function parseLegacyAnalysis(value, rawText) {
             'Turn this into one concrete next question',
         ],
         feedLabels: legacySections.map((section) => section.title).slice(0, 3),
+        patternSignals: [],
     };
 }
 class DemoStore {

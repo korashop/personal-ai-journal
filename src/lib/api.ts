@@ -99,7 +99,7 @@ export async function createConversationMessage(
 }
 
 export async function updateEntry(entryId: string, rawText: string): Promise<EntryRecord> {
-  const response = await fetch(apiUrl(`/api/entries/${entryId}`), {
+  const response = await fetchWithRetry(apiUrl(`/api/entries/${entryId}`), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -111,7 +111,7 @@ export async function updateEntry(entryId: string, rawText: string): Promise<Ent
 }
 
 export async function reanalyzeEntry(entryId: string): Promise<EntryRecord> {
-  const response = await fetch(apiUrl(`/api/entries/${entryId}/reanalyze`), {
+  const response = await fetchWithRetry(apiUrl(`/api/entries/${entryId}/reanalyze`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
