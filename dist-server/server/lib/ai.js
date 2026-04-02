@@ -76,10 +76,6 @@ function cleanTruncatedEnding(text) {
         if (boundary >= 0) {
             return normalized.slice(0, boundary + 1).trim();
         }
-        const lastSpace = normalized.lastIndexOf(' ');
-        if (lastSpace > 40) {
-            return normalized.slice(0, lastSpace).trim();
-        }
     }
     const lastSentenceBoundary = Math.max(normalized.lastIndexOf('. '), normalized.lastIndexOf('? '), normalized.lastIndexOf('! '));
     if (lastSentenceBoundary >= 0 && normalized.length - lastSentenceBoundary > 140) {
@@ -909,6 +905,7 @@ function evidenceLooksFragmentary(line) {
         words.length < 5 ||
         /(?:^not like\b|^on [A-Z][a-z]+\b|^through\b)/i.test(clean) ||
         /\b(?:which|who|we|i)\s*$/i.test(clean) ||
+        /\b(?:would|could|will|to|for|from|about|before|after|because|with|without|into|than)\s*$/i.test(clean) ||
         /\b(?:img|heic|transcribed journal page)\b/i.test(clean) ||
         DANGLING_ENDING_PATTERN.test(clean));
 }
@@ -1051,6 +1048,71 @@ function buildOverviewFromCluster(title, entryCount, familyKey, evidence) {
     ]
         .filter(Boolean);
     return cleanTruncatedEnding(parts.join(' ')) || title;
+}
+function formatPatternSentence(text) {
+    const cleaned = cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(text)));
+    if (!cleaned)
+        return '';
+    const sentence = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    return /[.!?]"?$/.test(sentence) ? sentence : `${sentence}.`;
+}
+function buildThemeDimensionText(cluster, evidence) {
+    const cleaned = cleanTruncatedEnding(evidence);
+    if (!cleaned || evidenceLooksFragmentary(cleaned))
+        return '';
+    const lower = cleaned.toLowerCase();
+    if (cluster.familyKey === 'self-authorization') {
+        if (/self authorization|capab|qualified|entitled|imposter|clarify|permission/.test(lower)) {
+            return formatPatternSentence(`The ask gets delayed by a need to establish legitimacy first: ${cleaned}`);
+        }
+    }
+    if (cluster.familyKey === 'outward-proof') {
+        if (/external proof|see someone else|idealiz|checking outward|can't define my own wants|admired/.test(lower)) {
+            return formatPatternSentence(`You look to someone else’s desire, authority, or status to validate your own: ${cleaned}`);
+        }
+    }
+    if (cluster.familyKey === 'alignment-drift') {
+        return formatPatternSentence(`Alignment is being tracked as a felt state, and the journal keeps noticing where the current mode does or doesn't match that: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'output-anchor') {
+        return formatPatternSentence(`Producing something concrete is standing in for a deeper need to make the day feel traceable and real: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'relationship-attunement') {
+        if (/dani|attun|expressive love|felt/.test(lower)) {
+            return formatPatternSentence(`The relationship standard is not generic closeness, but visibly felt and expressive attunement: ${cleaned}`);
+        }
+    }
+    if (cluster.familyKey === 'collaboration-threshold') {
+        return formatPatternSentence(`The desire is to move out of solo striving and into a team or partner structure that changes what becomes possible: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'family-mission') {
+        return formatPatternSentence(`Family appears as an organizing life direction, and you're testing how to build toward it deliberately without losing surrender: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'depth-craft') {
+        return formatPatternSentence(`The thread is a pull toward deeper craft and sustained immersion, especially where current life still feels broad or shallow: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'certainty-delay') {
+        return formatPatternSentence(`Visible action gets postponed until enough certainty or legitimacy appears, and the delay itself becomes part of the pain: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'physical-pull') {
+        return formatPatternSentence(`Embodied or physical forms of making carry a distinct charge here: ${cleaned}`);
+    }
+    if (cluster.familyKey === 'missed-window') {
+        return formatPatternSentence(`The entry revisits an earlier moment of non-action and asks whether that delay has become a lasting story of missed timing: ${cleaned}`);
+    }
+    return formatPatternSentence(cleaned);
+}
+function buildClusterDimensionLines(cluster) {
+    const lines = dedupePatternLines(cluster.evidenceByEntry
+        .map((item) => buildThemeDimensionText(cluster, item.evidence))
+        .filter(Boolean)
+        .filter((item) => evidenceBelongsToCluster(cluster, item)));
+    if (lines.length)
+        return lines.slice(0, 4);
+    return dedupePatternLines(cluster.evidenceByEntry
+        .map((item) => formatPatternSentence(item.evidence))
+        .filter(Boolean)
+        .filter((item) => !evidenceLooksFragmentary(item))).slice(0, 4);
 }
 function themeTokenSet(title) {
     return new Set(normalizePatternTitle(title)
@@ -1224,10 +1286,7 @@ function evidenceBelongsToCluster(cluster, evidence) {
     return family ? family.test.test(evidence) : true;
 }
 function buildDeterministicPatternFromCluster(cluster) {
-    const evidence = dedupePatternLines(cluster.evidenceByEntry
-        .map((item) => cleanTruncatedEnding(item.evidence))
-        .filter(Boolean)
-        .filter((item) => evidenceBelongsToCluster(cluster, item))).slice(0, 4);
+    const evidence = buildClusterDimensionLines(cluster);
     return {
         title: cluster.title,
         overview: buildOverviewFromCluster(cluster.title, cluster.entryIds.length, cluster.familyKey, evidence),
