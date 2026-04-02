@@ -131,7 +131,7 @@ function shouldRefreshPatterns(
     ),
   ).length
   if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6) return true
-  if (patterns.some((pattern) => (pattern.entryCount ?? 0) >= 3 && pattern.dimensions.length < 2)) return true
+  if (patterns.some((pattern) => !pattern.dimensions.length)) return true
 
   const looksBrokenCopy = (text: string) => {
     const clean = text.trim()

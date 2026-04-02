@@ -1444,9 +1444,44 @@ function patternHasEnoughThemeEvidence(
   pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>,
 ) {
   if (!pattern.entryIds.length || !pattern.dimensions.length) return false
-  if (pattern.entryIds.length >= 3 && pattern.dimensions.length < 2) return false
   if (pattern.dimensions.some((line) => evidenceLooksFragmentary(line))) return false
-  return true
+  return scoreThemeSignal(pattern) >= 7
+}
+
+function scoreTextSpecificity(text: string) {
+  const clean = normalizeWhitespace(stripMarkdown(cleanTruncatedEnding(text)))
+  const words = clean.split(' ').filter(Boolean)
+  let score = 0
+  if (words.length >= 8 && words.length <= 30) score += 2
+  if (/[.!?]$/.test(clean)) score += 1
+  if (/\b(i want|i need|i feel|you want|you need|you feel|because|but|rather than|instead of)\b/i.test(clean)) score += 1
+  if (/\b(dani|yoni|elie|family|shipping|output|alignment|attunement|authorization|surrender|collaborators?)\b/i.test(clean)) {
+    score += 1
+  }
+  if (/\b(?:this theme|the journal|the entry|recent evidence|example)\b/i.test(clean)) score -= 1
+  return score
+}
+
+function scoreThemeSignal(
+  pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>,
+) {
+  const distinctDimensions = dedupePatternLines(pattern.dimensions, pattern.overview)
+  const entryCount = pattern.entryIds.length
+  const dimensionScore = distinctDimensions.reduce((sum, dimension) => sum + scoreTextSpecificity(dimension), 0)
+  const titleScore = titleQualityScore(pattern.title)
+  const recurrenceScore =
+    entryCount >= 5 ? 8 :
+      entryCount >= 3 ? 5 :
+        entryCount === 2 ? 3 :
+          1
+  const evidenceBreadthScore =
+    distinctDimensions.length >= 3 ? 4 :
+      distinctDimensions.length === 2 ? 2 :
+        0
+  const overviewScore = Math.max(0, scoreTextSpecificity(pattern.overview))
+  const singletonPenalty = entryCount === 1 && distinctDimensions.length < 2 ? 2 : 0
+
+  return recurrenceScore + evidenceBreadthScore + dimensionScore + titleScore + overviewScore - singletonPenalty
 }
 
 function themeTokenSet(title: string) {
@@ -1712,9 +1747,11 @@ function buildDeterministicPatterns(entries: JournalEntry[], previousPatterns: P
 
   return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
     .sort((left, right) => {
-      const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
-      const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
-      return rightScore - leftScore
+      const rightScore = scoreThemeSignal(right) + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
+      const leftScore = scoreThemeSignal(left) + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
+      if (rightScore !== leftScore) return rightScore - leftScore
+      if (right.entryCount !== left.entryCount) return right.entryCount - left.entryCount
+      return left.title.localeCompare(right.title)
     })
     .slice(0, 8)
 }
@@ -1731,7 +1768,7 @@ function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
     ),
   ).length
   if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6) return true
-  if (patterns.some((pattern) => pattern.entryCount >= 3 && pattern.dimensions.length < 2)) return true
+  if (patterns.some((pattern) => scoreThemeSignal(pattern) < 7)) return true
   return patterns.some((pattern) =>
     /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
     looksTruncatedPatternText(pattern.title) ||
@@ -1973,9 +2010,11 @@ export async function buildPatterns(
     if (!patternsLookWeak(reconciled, recentEntries.length)) {
       return reconciled
         .sort((left, right) => {
-          const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
-          const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
-          return rightScore - leftScore
+          const rightScore = scoreThemeSignal(right) + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
+          const leftScore = scoreThemeSignal(left) + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
+          if (rightScore !== leftScore) return rightScore - leftScore
+          if (right.entryCount !== left.entryCount) return right.entryCount - left.entryCount
+          return left.title.localeCompare(right.title)
         })
         .slice(0, 9)
     }
