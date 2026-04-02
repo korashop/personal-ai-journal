@@ -1003,7 +1003,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'relationship-attunement',
     title: 'Attunement as requirement',
-    test: /dani|relationship|partner|attun|expressive love|closeness|love from/i,
+    test: /dani|attun|expressive love|felt love|closeness|want a partner who|relationship reflection/i,
     questions: [
       'What does this reveal about the kind of attunement you actually need?',
       'Where do you keep translating that need into something smaller or safer?',
@@ -1012,7 +1012,7 @@ const THEME_FAMILIES: ThemeFamily[] = [
   {
     key: 'collaboration-threshold',
     title: 'Who not how as threshold',
-    test: /who not how|collaborat|small team|hire|ownership|partner(?:s)?|who'?s/i,
+    test: /who not how|collaborat|small team|hire|ownership|find collaborators|who'?s/i,
     questions: [
       'What kind of collaborator would actually unlock this, not just theoretically help?',
       'What would make the vision compelling enough for someone else to join?',
@@ -1176,17 +1176,15 @@ function buildOverviewFromCluster(
   const second = cleanTruncatedEnding(
     evidence.find((item, index) => index > 0 && semanticSimilarity(item, lead) < 0.42) ?? '',
   )
+  const titleStem = normalizePatternTitle(title).split(' ')[0] ?? ''
+  const titleLead = lead && titleStem && !normalizePatternTitle(lead).includes(titleStem) ? `${title}: ${lead}` : lead
 
   if (entryCount >= 2) {
-    const parts = [
-      `${title} keeps showing up across ${entryCount} entries.`,
-      lead,
-      second && !normalizePatternTitle(second).includes(normalizePatternTitle(lead)) ? second : '',
-    ].filter(Boolean)
+    const parts = [titleLead, second && semanticSimilarity(second, lead) < 0.42 ? second : ''].filter(Boolean)
     return cleanTruncatedEnding(parts.join(' '))
   }
 
-  return cleanTruncatedEnding(lead || `${title} is active in the recent journal.`)
+  return cleanTruncatedEnding(titleLead || title)
 }
 
 function themeTokenSet(title: string) {
@@ -1479,11 +1477,34 @@ function patternTextLooksPlaceholder(text: string) {
 function enrichedPatternLooksWeak(pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>) {
   if (patternTextLooksPlaceholder(pattern.overview)) return true
   if (looksTruncatedPatternText(pattern.title) || looksTruncatedPatternText(pattern.overview)) return true
-  if (pattern.dimensions.length < 2) return true
+  if (pattern.dimensions.length < 1) return true
   if (pattern.questions.length < 1) return true
   if (pattern.dimensions.some((item) => looksTruncatedPatternText(item) || patternTextLooksPlaceholder(item))) return true
   if (pattern.questions.some((item) => looksTruncatedPatternText(item))) return true
   return false
+}
+
+type EnrichedClusterResponse = {
+  clusterId?: string
+  title?: string
+  overview?: string
+  dimensions?: string[]
+  questions?: string[]
+  exploreOptions?: string[]
+}
+
+function matchEnrichedCluster(
+  cluster: PatternClusterDraft,
+  parsed: EnrichedClusterResponse[],
+  fallbackIndex: number,
+) {
+  return (
+    parsed.find((item) => item.clusterId === cluster.clusterId) ??
+    parsed.find((item) => item.title && normalizePatternTitle(item.title) === normalizePatternTitle(cluster.title)) ??
+    parsed.find((item) => item.title && semanticSimilarity(item.title, cluster.title) >= 0.72) ??
+    parsed[fallbackIndex] ??
+    null
+  )
 }
 
 async function enrichPatternClustersWithModel(
@@ -1568,23 +1589,14 @@ ${clusters
     .map((item) => item.text)
     .join('\n')
 
-  const parsed = parseJsonFromText<
-    Array<{
-      clusterId?: string
-      title?: string
-      overview?: string
-      dimensions?: string[]
-      questions?: string[]
-      exploreOptions?: string[]
-    }>
-  >(text)
+  const parsed = parseJsonFromText<EnrichedClusterResponse[]>(text)
 
   if (!parsed) {
     return { rawText: text, patterns: [] }
   }
 
-  const patterns = clusters.flatMap((cluster) => {
-    const enriched = parsed.find((item) => item.clusterId === cluster.clusterId)
+  const patterns = clusters.flatMap((cluster, index) => {
+    const enriched = matchEnrichedCluster(cluster, parsed, index)
     if (!enriched?.title || !enriched.overview) return []
 
     const pattern = {
