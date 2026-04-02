@@ -289,8 +289,12 @@ function finalizeEntryDigest(candidateLines: string[] | undefined, rawText: stri
     .filter(Boolean)
     .filter((line) => !looksAbstractDigestLine(line))
 
+  if (aiLines.length >= 3) {
+    return aiLines.slice(0, 5)
+  }
+
   const sourceLines = buildEntryDigest(rawText)
-  const merged = [...aiLines, ...sourceLines]
+  const merged = [...sourceLines, ...aiLines]
   const deduped: string[] = []
 
   for (const line of merged) {
@@ -301,6 +305,20 @@ function finalizeEntryDigest(candidateLines: string[] | undefined, rawText: stri
   }
 
   return deduped.slice(0, 5)
+}
+
+type SummaryLayer = {
+  title: string
+  summary: string
+  entryDigest: string[]
+  contextBullets: string[]
+  feedLabels: string[]
+  patternSignals: string[]
+}
+
+type AnalysisLayer = {
+  sections: Array<{ id: string; title: string; content: string }>
+  exploreOptions: string[]
 }
 
 async function repairPatternJson(
@@ -404,6 +422,8 @@ Return JSON only with this shape:
 }
 
 Rules:
+- Treat entryDigest and contextBullets as the scan layer.
+- Treat sections as the analysis layer.
 - Separate distinct threads when they are not actually one thing.
 - Keep entryDigest concrete and source-grounded.
 - Mention real names, projects, and decisions when they materially appear.
@@ -413,6 +433,7 @@ Rules:
 - Account for the full spread of the entry, not just the beginning.
 - Keep every field concise. No entryDigest or context bullet should be a pasted paragraph.
 - patternSignals should be 2 to 4 short mechanism-level phrases that may recur across entries.
+- In sections, do more than recap. Add interpretation, implications, or structural reading.
 
 Entry:
 ${clipLongEntryForAnalysis(rawText, 7000)}`
@@ -462,6 +483,159 @@ ${clipLongEntryForAnalysis(rawText, 7000)}`
     exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
     feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, rawText, sections),
     patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
+  }
+}
+
+async function generateSummaryLayer(rawText: string, tags: string[]): Promise<SummaryLayer | null> {
+  if (!anthropic) return null
+
+  const prompt = `Create the scan layer for a journal entry.
+Return JSON only with this shape:
+{
+  "title": "short durable title",
+  "summary": "1 or 2 sentence summary",
+  "entryDigest": ["3 to 5 short summary bullets"],
+  "contextBullets": ["2 to 3 short concrete source bullets"],
+  "feedLabels": ["2 to 3 short labels"],
+  "patternSignals": ["2 to 4 short recurring mechanisms or live threads"]
+}
+
+Rules:
+- This is the summary layer only. Do not do the deeper analysis here.
+- entryDigest must be short summary bullets, not copied paragraphs.
+- Each digest bullet should stand alone and capture one distinct thing.
+- Prefer concrete nouns: people, projects, decisions, tensions, scenes.
+- contextBullets should stay close to what was actually described.
+- Keep every item brief. No ellipses.
+- patternSignals should be mechanism-level, 2 to 6 words each.
+
+Entry:
+${clipLongEntryForAnalysis(rawText, 7000)}
+
+Concrete source moments:
+${buildSourceMoments(rawText, 8).map((item) => `- ${item}`).join('\n') || 'None'}
+
+Tags:
+${tags.join(', ') || 'None'}`
+
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 900,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = response.content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+
+  const parsed = parseJsonFromText<{
+    title?: string
+    summary?: string
+    entryDigest?: string[]
+    contextBullets?: string[]
+    feedLabels?: string[]
+    patternSignals?: string[]
+  }>(text)
+
+  if (!parsed?.summary) return null
+
+  return {
+    title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary.trim(), rawText, tags),
+    summary: deriveDisplaySummary(parsed.summary.trim(), rawText),
+    entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
+    contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
+    feedLabels: (parsed.feedLabels ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
+    patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
+  }
+}
+
+async function generateAnalysisLayer(
+  rawText: string,
+  tags: string[],
+  context: Context,
+  summaryLayer: SummaryLayer,
+): Promise<AnalysisLayer | null> {
+  if (!anthropic) return null
+
+  const isLongEntry = rawText.length > 9000
+  const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 1 : 4, isLongEntry ? 100 : 180)
+  const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 80 : 150)
+
+  const prompt = `Write the analysis layer for a journal entry.
+The summary layer is already done. Do not repeat it. Add interpretation, pattern-reading, and useful distinctions.
+Return JSON only with this shape:
+{
+  "sections": [{ "title": "string", "content": "markdown string" }],
+  "exploreOptions": ["string"]
+}
+
+Rules:
+- This layer should feel more analytical than descriptive.
+- Do not mostly summarize what happened. Assume the user can already see the summary layer.
+- Separate distinct threads when they are actually distinct.
+- Produce 2 to 5 sections.
+- Section titles should name the real thread, not generic therapy headings.
+- Go beyond recap: identify patterns, conflicts, implications, or what seems structurally true.
+- Use complete thoughts. No ellipses.
+- Avoid fluffy abstraction. Stay grounded in the source material.
+- If a thread deserves direct interpretation, say what you think.
+- Explore options should be specific and useful, not generic.
+
+Summary layer already shown to user:
+Summary: ${summaryLayer.summary}
+At a glance:
+${summaryLayer.entryDigest.map((item) => `- ${item}`).join('\n') || 'None'}
+
+Context from the raw entry:
+${summaryLayer.contextBullets.map((item) => `- ${item}`).join('\n') || 'None'}
+
+Pattern signals:
+${summaryLayer.patternSignals.map((item) => `- ${item}`).join('\n') || 'None'}
+
+Memory doc:
+${memoryForPrompt(context.memoryDoc, isLongEntry ? 800 : 2400)}
+
+Recent entries:
+${recentEntryLines}
+
+Relevant highlights:
+${highlightLines}
+
+Entry:
+${clipLongEntryForAnalysis(rawText, 7000)}`
+
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel,
+    max_tokens: isLongEntry ? 1400 : 1500,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = response.content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+
+  const parsed = parseJsonFromText<{
+    sections?: Array<{ title?: string; content?: string }>
+    exploreOptions?: string[]
+  }>(text)
+
+  if (!parsed) return null
+
+  const sections = (parsed.sections ?? [])
+    .filter((section) => section.title && section.content)
+    .map((section, index) => ({
+      id: `section-${index + 1}`,
+      title: section.title!.trim(),
+      content: cleanTruncatedEnding(section.content!),
+    }))
+
+  if (!sections.length) return null
+
+  return {
+    sections,
+    exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
   }
 }
 
@@ -613,210 +787,36 @@ function analysisLooksThin(
   return false
 }
 
-async function repairAnalysisJson(
-  malformedResponse: string,
-  rawText: string,
-  tags: string[],
-): Promise<AnalysisPayload | null> {
-  if (!anthropic) return null
-
-  const repairPrompt = `Convert the following malformed analysis into strict JSON only.
-Use this exact shape:
-{
-  "title": "a short durable title",
-  "summary": "1 or 2 sentence feed summary",
-  "entryDigest": ["short bullet capturing a distinct thing that came up"],
-  "contextBullets": ["short source-context bullet"],
-  "sections": [{ "title": "string", "content": "markdown string" }],
-  "exploreOptions": ["string"],
-  "feedLabels": ["string"],
-  "patternSignals": ["short recurring mechanism or live thread"]
-}
-
-Rules:
-- Keep 2 to 5 sections.
-- Preserve depth and specificity from the original content.
-- Do not introduce upload scaffolding, OCR notes, or image markers into the title or summary.
-
-Original entry:
-${rawText}
-
-Malformed analysis:
-${malformedResponse}`
-
-  const repairResponse = await anthropic.messages.create({
-    model: config.anthropicModel,
-    max_tokens: 1200,
-    messages: [{ role: 'user', content: repairPrompt }],
-  })
-
-  const repairText = repairResponse.content
-    .filter((item) => item.type === 'text')
-    .map((item) => item.text)
-    .join('\n')
-
-  const parsed = parseJsonFromText<{
-    title?: string
-    summary?: string
-    entryDigest?: string[]
-    contextBullets?: string[]
-    sections?: Array<{ title?: string; content?: string }>
-    exploreOptions?: string[]
-    feedLabels?: string[]
-    patternSignals?: string[]
-  }>(repairText)
-
-  if (!parsed) return null
-
-  const sections = (parsed.sections ?? [])
-    .filter((section) => section.title && section.content)
-    .map((section, index) => ({
-      id: `repair-section-${index + 1}`,
-      title: section.title!.trim(),
-      content: cleanTruncatedEnding(section.content!),
-    }))
-
-  if (!sections.length) return null
-
-  const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3)
-
-  return {
-    title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), rawText, tags),
-    summary: deriveDisplaySummary(parsed.summary?.trim(), rawText),
-    entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
-    contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
-    sections,
-    exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
-    feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, rawText, sections),
-    patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
-  }
-}
-
 export async function generateAnalysis(
   rawText: string,
   tags: string[],
   context: Context,
 ): Promise<AnalysisPayload> {
   const cleanedRaw = sanitizeJournalText(rawText) || rawText
-  const analysisEntryText = clipLongEntryForAnalysis(cleanedRaw, 8000)
-  const isLongEntry = cleanedRaw.length > 9000
 
   if (!anthropic) {
     return fallbackAnalysis(cleanedRaw, tags)
   }
 
-  const recentEntryLines = recentEntriesForPrompt(context.recentEntries, isLongEntry ? 1 : 4, isLongEntry ? 100 : 180)
-  const highlightLines = highlightsForPrompt(context.relevantHighlights, isLongEntry ? 1 : 2, isLongEntry ? 80 : 150)
+  const summaryLayer = await generateSummaryLayer(cleanedRaw, tags)
+  const analysisLayer = summaryLayer
+    ? await generateAnalysisLayer(cleanedRaw, tags, context, summaryLayer).catch(() => null)
+    : null
 
-  const prompt = `You are a direct, highly useful thinking partner with cumulative memory.
-Never congratulate the user for journaling.
-Do not force a fixed structure if the entry does not need it.
-Return JSON only with this shape:
-{
-  "title": "a short durable title for the entry feed",
-  "summary": "one concise but informative summary for the entry feed",
-  "entryDigest": ["3 to 5 short bullets capturing distinct things that came up in the entry"],
-  "contextBullets": ["2 to 3 short bullets capturing what the user was actually describing"],
-  "sections": [
-    { "title": "string", "content": "markdown string" }
-  ],
-  "exploreOptions": ["3 to 5 clickable directions to explore next"],
-  "feedLabels": ["2 to 3 compact thematic labels for the entry list"],
-  "patternSignals": ["2 to 4 short recurring mechanisms or live threads"]
-}
-
-Rules:
-- Produce between 2 and 5 sections depending on what the entry needs.
-- Section lengths can vary a lot.
-- Avoid template-sounding headings like always using the same 4 labels.
-- Optimize for usefulness and specificity.
-- Use complete thoughts. Do not end sections with ellipses or sentence fragments.
-- The title should sound like the real center of gravity of the entry, not the first sentence and not "Claude's analysis..."
-- The summary should help the user recognize what this entry is actually about later, in 1 or 2 sentences max.
-- The entryDigest should be the fastest honest answer to "what came up here?" Use it for distinct topics, scenes, decisions, or people mentioned.
-- Keep entryDigest concrete and source-grounded. Mention real names, projects, places, or decisions when they appear.
-- Every entryDigest bullet must stand alone as a short summary bullet, not copied prose from the entry.
-- Do not use abstract bullets like "the tension" or "the mechanism" when a more concrete bullet is possible.
-- Context bullets should be short, concrete, and source-oriented. Think "what was happening / what was being wrestled with", not interpretation.
-- No context bullet should exceed one sentence.
-- Do not simply restate the first section in shorter form.
-- Explore options should feel like meaningful next angles, not generic prompts.
-- Feed labels should be short and useful, not broad buckets unless those are genuinely the right level.
-- patternSignals should name recurring mechanisms or active live threads in 2 to 6 words each.
-- If the entry is long, account for the whole thing. Do not analyze only the beginning and ignore later turns.
-- If you notice a change between the beginning, middle, and end, include that movement in the analysis.
-- If the entry contains multiple unrelated or loosely related threads, separate them. Do not force them into one coherent narrative unless the relationship is actually clear.
-- Use section titles that reflect distinct threads, not generic therapy headings.
-- Inside sections, prefer short paragraphs and bullets when that makes the thinking easier to scan without losing depth.
-- Never end any field with ellipses.
-
-Memory doc:
-${memoryForPrompt(context.memoryDoc, isLongEntry ? 800 : 2400)}
-
-Recent entries:
-${recentEntryLines}
-
-Relevant highlights:
-${highlightLines}
-
-Tags:
-${tags.join(', ') || 'None'}
-
-New entry:
-${analysisEntryText}
-
-Concrete source moments:
-${buildSourceMoments(cleanedRaw, 7).map((item) => `- ${item}`).join('\n') || 'None'}`
-
-  const response = await anthropic.messages.create({
-    model: config.anthropicModel,
-    max_tokens: isLongEntry ? 1100 : 1500,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const text = response.content
-    .filter((item) => item.type === 'text')
-    .map((item) => item.text)
-    .join('\n')
-
-  const parsed = parseJsonFromText<{
-    title?: string
-    summary?: string
-    entryDigest?: string[]
-    contextBullets?: string[]
-    sections?: Array<{ title?: string; content?: string }>
-    exploreOptions?: string[]
-    feedLabels?: string[]
-    patternSignals?: string[]
-  }>(text)
-
-  if (parsed) {
-    const sections = (parsed.sections ?? [])
-      .filter((section) => section.title && section.content)
-      .map((section, index) => ({
-        id: `section-${index + 1}`,
-        title: section.title!.trim(),
-        content: cleanTruncatedEnding(section.content!),
-      }))
-
-    if (sections.length && !analysisLooksThin({ ...parsed, sections }, cleanedRaw)) {
-      const feedLabels = (parsed.feedLabels ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3)
-
-      return {
-        title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), cleanedRaw, tags),
-        summary: deriveDisplaySummary(parsed.summary?.trim(), cleanedRaw),
-        entryDigest: finalizeEntryDigest(parsed.entryDigest, cleanedRaw),
-        contextBullets: (parsed.contextBullets ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 3),
-        sections,
-        exploreOptions: (parsed.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 5),
-        feedLabels: feedLabels.length ? feedLabels : buildFeedLabels(tags, cleanedRaw, sections),
-        patternSignals: (parsed.patternSignals ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean).slice(0, 4),
-      }
+  if (summaryLayer && analysisLayer && !analysisLooksThin({ ...summaryLayer, sections: analysisLayer.sections }, cleanedRaw)) {
+    return {
+      title: summaryLayer.title,
+      summary: summaryLayer.summary,
+      entryDigest: summaryLayer.entryDigest,
+      contextBullets: summaryLayer.contextBullets,
+      sections: analysisLayer.sections,
+      exploreOptions: analysisLayer.exploreOptions,
+      feedLabels: summaryLayer.feedLabels.length
+        ? summaryLayer.feedLabels
+        : buildFeedLabels(tags, cleanedRaw, analysisLayer.sections),
+      patternSignals: summaryLayer.patternSignals,
     }
   }
-
-  const repaired = await repairAnalysisJson(text, cleanedRaw, tags)
-  if (repaired && !analysisLooksThin(repaired, cleanedRaw)) return repaired
 
   const retried = await retryAnalysisWithTighterPrompt(cleanedRaw, tags)
   if (retried && !analysisLooksThin(retried, cleanedRaw)) return retried
@@ -878,12 +878,12 @@ export function simplifyPatternTitle(title: string) {
 
   const lower = clean.toLowerCase()
 
-  if (/authoriz|permission|ask|capable|qualified/.test(lower)) return 'Waiting for permission'
-  if (/admired|idealiz|validation|recognized|borrow/.test(lower)) return 'Looking outward for proof'
-  if (/jealous|envy|mimetic/.test(lower)) return 'Jealousy as direction'
-  if (/alignment|surrender|distance|spiritual/.test(lower)) return 'Distance from alignment'
-  if (/delay|waiting|certainty|clarity|avoid/.test(lower)) return 'Waiting for certainty'
-  if (/timing|missed window|too late|late/.test(lower)) return 'The missed-window story'
+  if (/^waiting for permission$/.test(lower)) return 'Waiting for permission'
+  if (/^looking outward for proof$/.test(lower)) return 'Looking outward for proof'
+  if (/^jealousy as direction$/.test(lower)) return 'Jealousy as direction'
+  if (/^distance from alignment$/.test(lower)) return 'Distance from alignment'
+  if (/^waiting for certainty$/.test(lower)) return 'Waiting for certainty'
+  if (/^the missed window story$/.test(lower)) return 'The missed-window story'
 
   const shortened = clean.split(/[:(,-]/)[0]?.trim() ?? clean
   return clip(shortened, 42)
