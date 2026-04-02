@@ -99,6 +99,20 @@ function normalizeWhitespace(text: string) {
 function cleanTruncatedEnding(text: string) {
   const normalized = text.trim().replace(/[.…]+\s*$/, '').trim()
   if (!normalized) return ''
+  if (!/[.!?]"?$/.test(normalized)) {
+    const boundary = Math.max(
+      normalized.lastIndexOf('. '),
+      normalized.lastIndexOf('? '),
+      normalized.lastIndexOf('! '),
+    )
+    if (boundary >= 0) {
+      return normalized.slice(0, boundary + 1).trim()
+    }
+    const lastSpace = normalized.lastIndexOf(' ')
+    if (lastSpace > 40) {
+      return normalized.slice(0, lastSpace).trim()
+    }
+  }
   const lastSentenceBoundary = Math.max(
     normalized.lastIndexOf('. '),
     normalized.lastIndexOf('? '),
@@ -409,90 +423,6 @@ function buildSummaryLayerFromSections(
       .filter(Boolean)
       .slice(0, 4),
   }
-}
-
-async function repairPatternJson(
-  malformedResponse: string,
-  memoryDoc: MemoryDocumentRecord | null,
-  entries: JournalEntry[],
-  previousPatterns: PatternSection[],
-): Promise<
-  Array<{
-    title: string
-    overview: string
-    dimensions: string[]
-    questions: string[]
-    exploreOptions: string[]
-    entryIds: string[]
-  }>
-  | null
-> {
-  if (!anthropic) return null
-
-  const prompt = `Convert the following malformed theme synthesis into strict JSON only.
-Use this exact shape:
-[
-  {
-    "title": "theme title",
-    "overview": "state of affairs",
-    "dimensions": ["distinct way the theme shows up"],
-    "questions": ["useful unresolved question"],
-    "exploreOptions": ["one way to engage this theme"],
-    "entryIds": ["entry id"]
-  }
-]
-
-Rules:
-- Keep the real distinct themes. Do not collapse them unnecessarily.
-- Preserve continuity with existing themes when appropriate.
-- Use only entry IDs from the provided entries.
-
-Memory:
-${memoryForPrompt(memoryDoc, 1400)}
-
-Entries:
-${patternEntriesForPrompt(entries, 18)}
-
-Existing themes:
-${previousPatternsForPrompt(previousPatterns)}
-
-Malformed theme synthesis:
-${malformedResponse}`
-
-  const response = await anthropic.messages.create({
-    model: config.anthropicModel,
-    max_tokens: 1600,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const text = response.content
-    .filter((item) => item.type === 'text')
-    .map((item) => item.text)
-    .join('\n')
-
-  const parsed = parseJsonFromText<
-    Array<{
-      title?: string
-      overview?: string
-      dimensions?: string[]
-      questions?: string[]
-      exploreOptions?: string[]
-      entryIds?: string[]
-    }>
-  >(text)
-
-  if (!parsed) return null
-
-  return parsed
-    .filter((item) => item.title && item.overview)
-    .map((item) => ({
-      title: simplifyPatternTitle(item.title!.trim()),
-      overview: cleanTruncatedEnding(item.overview!),
-      dimensions: (item.dimensions ?? []).map((signal) => cleanTruncatedEnding(signal)).filter(Boolean),
-      questions: (item.questions ?? []).map((question) => cleanTruncatedEnding(question)).filter(Boolean),
-      exploreOptions: (item.exploreOptions ?? []).map((option) => cleanTruncatedEnding(option)).filter(Boolean).slice(0, 4),
-      entryIds: (item.entryIds ?? []).filter(Boolean),
-    }))
 }
 
 async function retryAnalysisWithTighterPrompt(rawText: string, tags: string[]) {
@@ -1029,12 +959,6 @@ function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'up
   return merged
 }
 
-type PatternCandidate = {
-  title: string
-  entryIds: string[]
-  evidence: string[]
-}
-
 type LocalThemeCandidate = {
   title: string
   entryId: string
@@ -1042,6 +966,21 @@ type LocalThemeCandidate = {
   createdAt: string
   weight: number
   familyKey?: string
+}
+
+type PatternClusterDraft = {
+  clusterId: string
+  title: string
+  familyKey?: string
+  entryIds: string[]
+  evidenceByEntry: Array<{
+    entryId: string
+    entryTitle: string
+    evidence: string
+    weight: number
+  }>
+  totalWeight: number
+  createdAt: string
 }
 
 type ThemeFamily = {
@@ -1346,6 +1285,121 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
   return candidates
 }
 
+function buildPatternClusters(entries: JournalEntry[]) {
+  const localCandidates = buildLocalThemeCandidates(entries)
+  const entryTitleById = new Map(entries.map((entry) => [entry.id, entry.title]))
+  const clusters: Array<{
+    title: string
+    titleWeights: Map<string, number>
+    familyKey?: string
+    entryIds: Set<string>
+    evidenceByEntry: Map<string, Array<{ evidence: string; weight: number }>>
+    createdAt: string
+    totalWeight: number
+  }> = []
+
+  for (const candidate of localCandidates) {
+    const existing = clusters.find((cluster) => {
+      if (candidate.familyKey && cluster.familyKey === candidate.familyKey) return true
+      const sameTitle = normalizePatternTitle(cluster.title) === normalizePatternTitle(candidate.title)
+      const titleSimilar =
+        themeTitleSimilarity(cluster.title, candidate.title) >= 0.78 ||
+        semanticSimilarity(cluster.title, candidate.title) >= 0.78
+      return sameTitle || titleSimilar
+    })
+
+    if (!existing) {
+      clusters.push({
+        title: candidate.title,
+        titleWeights: new Map([[candidate.title, candidate.weight]]),
+        familyKey: candidate.familyKey,
+        entryIds: new Set([candidate.entryId]),
+        evidenceByEntry: new Map([[candidate.entryId, [{ evidence: candidate.evidence, weight: candidate.weight }]]]),
+        createdAt: candidate.createdAt,
+        totalWeight: candidate.weight,
+      })
+      continue
+    }
+
+    existing.entryIds.add(candidate.entryId)
+    existing.totalWeight += candidate.weight
+    existing.familyKey = existing.familyKey ?? candidate.familyKey
+    existing.titleWeights.set(candidate.title, (existing.titleWeights.get(candidate.title) ?? 0) + candidate.weight)
+    existing.title = chooseBestClusterTitle(existing)
+
+    const entryEvidence = existing.evidenceByEntry.get(candidate.entryId) ?? []
+    if (!entryEvidence.some((item) => normalizePatternTitle(item.evidence) === normalizePatternTitle(candidate.evidence))) {
+      entryEvidence.push({ evidence: candidate.evidence, weight: candidate.weight })
+      existing.evidenceByEntry.set(candidate.entryId, entryEvidence)
+    }
+
+    if (candidate.createdAt > existing.createdAt) {
+      existing.createdAt = candidate.createdAt
+    }
+  }
+
+  const scoredClusters = clusters
+    .filter((cluster) => cluster.entryIds.size > 0)
+    .sort((left, right) => {
+      const rightScore = right.entryIds.size * 100 + right.totalWeight * 4
+      const leftScore = left.entryIds.size * 100 + left.totalWeight * 4
+      if (rightScore !== leftScore) return rightScore - leftScore
+      return right.createdAt.localeCompare(left.createdAt)
+    })
+
+  const recurringClusters = scoredClusters.filter((cluster) => cluster.entryIds.size >= 2)
+  const singletonClusters = scoredClusters.filter((cluster) => cluster.entryIds.size === 1)
+  const selectedClusters = [
+    ...recurringClusters.slice(0, 7),
+    ...(recurringClusters.length >= 4 ? singletonClusters.slice(0, 1) : singletonClusters.slice(0, Math.max(0, 5 - recurringClusters.length)).slice(0, 2)),
+  ].slice(0, 8)
+
+  return selectedClusters.map((cluster, index): PatternClusterDraft => {
+    const evidenceByEntry = [...cluster.evidenceByEntry.entries()]
+      .flatMap(([entryId, evidenceItems]) =>
+        evidenceItems
+          .sort((left, right) => right.weight - left.weight)
+          .slice(0, 2)
+          .map((item) => ({
+            entryId,
+            entryTitle: entryTitleById.get(entryId) ?? 'Untitled entry',
+            evidence: cleanTruncatedEnding(item.evidence),
+            weight: item.weight,
+          })),
+      )
+      .sort((left, right) => right.weight - left.weight)
+
+    return {
+      clusterId: `cluster-${index + 1}`,
+      title: chooseBestClusterTitle(cluster),
+      familyKey: cluster.familyKey,
+      entryIds: [...cluster.entryIds],
+      evidenceByEntry,
+      totalWeight: cluster.totalWeight,
+      createdAt: cluster.createdAt,
+    }
+  })
+}
+
+function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
+  const evidence = dedupePatternLines(
+    cluster.evidenceByEntry.map((item) => cleanTruncatedEnding(item.evidence)).filter(Boolean),
+  ).slice(0, 4)
+
+  return {
+    title: cluster.title,
+    overview: buildOverviewFromCluster(cluster.title, cluster.entryIds.length, evidence),
+    dimensions: evidence,
+    questions: buildQuestionsForTheme(cluster.title),
+    exploreOptions: [
+      `Trace how ${cluster.title.toLowerCase()} evolves across entries`,
+      `Find the cost of ${cluster.title.toLowerCase()}`,
+      `Look for the next concrete move inside ${cluster.title.toLowerCase()}`,
+    ].map((item) => cleanTruncatedEnding(item)).slice(0, 3),
+    entryIds: cluster.entryIds,
+  }
+}
+
 function buildQuestionsForTheme(title: string) {
   const family = themeFamilyForText(title)
   if (family) {
@@ -1378,94 +1432,7 @@ function buildQuestionsForTheme(title: string) {
 }
 
 function buildDeterministicPatterns(entries: JournalEntry[], previousPatterns: PatternSection[]) {
-  const localCandidates = buildLocalThemeCandidates(entries)
-  const clusters: Array<{
-    title: string
-    titleWeights: Map<string, number>
-    familyKey?: string
-    entryIds: Set<string>
-    evidence: string[]
-    createdAt: string
-    totalWeight: number
-  }> = []
-
-  for (const candidate of localCandidates) {
-    const existing = clusters.find((cluster) => {
-      if (candidate.familyKey && cluster.familyKey === candidate.familyKey) return true
-      const sameTitle = normalizePatternTitle(cluster.title) === normalizePatternTitle(candidate.title)
-      const titleSimilar = themeTitleSimilarity(cluster.title, candidate.title) >= 0.72
-      const contentSimilar =
-        semanticSimilarity(
-          `${cluster.title} ${cluster.evidence.slice(0, 3).join(' ')}`,
-          `${candidate.title} ${candidate.evidence}`,
-        ) >= 0.46
-      return sameTitle || titleSimilar || contentSimilar
-    })
-
-    if (!existing) {
-      clusters.push({
-        title: candidate.title,
-        titleWeights: new Map([[candidate.title, candidate.weight]]),
-        familyKey: candidate.familyKey,
-        entryIds: new Set([candidate.entryId]),
-        evidence: [candidate.evidence],
-        createdAt: candidate.createdAt,
-        totalWeight: candidate.weight,
-      })
-      continue
-    }
-
-    existing.entryIds.add(candidate.entryId)
-    if (!existing.evidence.includes(candidate.evidence)) {
-      existing.evidence.push(candidate.evidence)
-    }
-    if (candidate.createdAt > existing.createdAt) {
-      existing.createdAt = candidate.createdAt
-    }
-    existing.totalWeight += candidate.weight
-    existing.familyKey = existing.familyKey ?? candidate.familyKey
-    existing.titleWeights.set(candidate.title, (existing.titleWeights.get(candidate.title) ?? 0) + candidate.weight)
-    existing.title = chooseBestClusterTitle(existing)
-  }
-
-  const scoredClusters = clusters
-    .filter((cluster) => cluster.title && cluster.evidence.length)
-    .sort((left, right) => {
-      const rightScore = right.entryIds.size * 100 + right.totalWeight * 4 + right.evidence.length
-      const leftScore = left.entryIds.size * 100 + left.totalWeight * 4 + left.evidence.length
-      if (rightScore !== leftScore) return rightScore - leftScore
-      return right.createdAt.localeCompare(left.createdAt)
-    })
-
-  const recurringClusters = scoredClusters.filter((cluster) => cluster.entryIds.size >= 2)
-  const singletonClusters = scoredClusters.filter((cluster) => cluster.entryIds.size < 2)
-  const selectedClusters = [
-    ...recurringClusters.slice(0, 7),
-    ...(
-      recurringClusters.length >= 4
-        ? singletonClusters.slice(0, 1)
-        : singletonClusters.slice(0, Math.max(0, 5 - recurringClusters.length)).slice(0, 2)
-    ),
-  ].slice(0, 8)
-
-  const deterministic = selectedClusters.map((cluster) => {
-      const evidence = dedupePatternLines(cluster.evidence.map((item) => cleanTruncatedEnding(item))).slice(0, 4)
-      const title = chooseBestClusterTitle(cluster)
-      const overview = buildOverviewFromCluster(title, cluster.entryIds.size, evidence)
-
-      return {
-        title,
-        overview: cleanTruncatedEnding(overview),
-        dimensions: evidence,
-        questions: buildQuestionsForTheme(title),
-        exploreOptions: [
-          `Trace how ${title.toLowerCase()} evolves across entries`,
-          `Find the cost of ${title.toLowerCase()}`,
-          `Look for the next concrete move inside ${title.toLowerCase()}`,
-        ].map((item) => cleanTruncatedEnding(item)).slice(0, 3),
-        entryIds: [...cluster.entryIds],
-      }
-    })
+  const deterministic = buildPatternClusters(entries).map((cluster) => buildDeterministicPatternFromCluster(cluster))
 
   return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
     .sort((left, right) => {
@@ -1474,44 +1441,6 @@ function buildDeterministicPatterns(entries: JournalEntry[], previousPatterns: P
       return rightScore - leftScore
     })
     .slice(0, 8)
-}
-
-function aggregatePatternCandidates(entries: JournalEntry[]) {
-  const localCandidates = buildLocalThemeCandidates(entries)
-  const grouped: PatternCandidate[] = []
-
-  for (const candidate of localCandidates) {
-    const existing = grouped.find((group) => {
-      const sameTitle = normalizePatternTitle(group.title) === normalizePatternTitle(candidate.title)
-      const similar = themeTitleSimilarity(group.title, candidate.title) >= 0.72
-      return sameTitle || similar
-    })
-
-    if (!existing) {
-      grouped.push({
-        title: candidate.title,
-        entryIds: [candidate.entryId],
-        evidence: [candidate.evidence],
-      })
-      continue
-    }
-
-    if (!existing.entryIds.includes(candidate.entryId)) {
-      existing.entryIds.push(candidate.entryId)
-    }
-    if (!existing.evidence.includes(candidate.evidence)) {
-      existing.evidence.push(candidate.evidence)
-    }
-  }
-
-  return grouped
-    .map((group) => ({
-      title: simplifyPatternTitle(group.title),
-      entryIds: group.entryIds,
-      evidence: dedupePatternLines(group.evidence.map((item) => cleanTruncatedEnding(item))).slice(0, 4),
-    }))
-    .sort((left, right) => right.entryIds.length - left.entryIds.length)
-    .slice(0, 18)
 }
 
 function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
@@ -1534,126 +1463,103 @@ function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
   )
 }
 
-function patternCoverageRatio(
-  patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>,
-  entries: JournalEntry[],
-) {
-  if (!entries.length) return 0
-  const coveredIds = new Set(patterns.flatMap((pattern) => pattern.entryIds))
-  return coveredIds.size / entries.length
-}
-
 function looksTruncatedPatternText(text: string) {
   return /(?:\.{3,}|…)\s*$/.test(text.trim())
 }
 
-function shouldForcePatternExpansion(
-  patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>,
-  entries: JournalEntry[],
-  candidateCount = 0,
-) {
-  if (!entries.length) return false
-  if (entries.length >= 10 && patterns.length <= 3) return true
-  if (candidateCount >= 8 && patterns.length <= 4) return true
-  if (entries.length >= 12 && patternCoverageRatio(patterns, entries) < 0.72) return true
-
-  return patterns.some((pattern) =>
-    looksTruncatedPatternText(pattern.overview) ||
-    pattern.dimensions.some(looksTruncatedPatternText) ||
-    pattern.questions.some(looksTruncatedPatternText),
+function patternTextLooksPlaceholder(text: string) {
+  return (
+    !text.trim() ||
+    /^this theme\b/i.test(text.trim()) ||
+    /\bkeeps showing up across \d+ entr/i.test(text) ||
+    /\bis emerging around\b/i.test(text)
   )
 }
 
-async function synthesizePatternsWithModel(
+function enrichedPatternLooksWeak(pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>) {
+  if (patternTextLooksPlaceholder(pattern.overview)) return true
+  if (looksTruncatedPatternText(pattern.title) || looksTruncatedPatternText(pattern.overview)) return true
+  if (pattern.dimensions.length < 2) return true
+  if (pattern.questions.length < 1) return true
+  if (pattern.dimensions.some((item) => looksTruncatedPatternText(item) || patternTextLooksPlaceholder(item))) return true
+  if (pattern.questions.some((item) => looksTruncatedPatternText(item))) return true
+  return false
+}
+
+async function enrichPatternClustersWithModel(
   memoryDoc: MemoryDocumentRecord | null,
-  recentEntries: JournalEntry[],
+  entries: JournalEntry[],
   previousPatterns: PatternSection[],
-  patternCandidates: PatternCandidate[],
-  options?: { expandAggressively?: boolean },
+  clusters: PatternClusterDraft[],
 ): Promise<{
   patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>
   rawText: string
 } | null> {
-  if (!anthropic || !recentEntries.length) return null
+  if (!anthropic || !clusters.length) return null
 
-  const continuityPatterns =
-    options?.expandAggressively && previousPatterns.length <= 3 && recentEntries.length >= 10
-      ? []
-      : previousPatterns
+  const entryMap = new Map(entries.map((entry) => [entry.id, entry]))
 
-  const prompt = `Build a set of clickable theme threads from this journal history.
+  const prompt = `Turn these pre-grouped journal clusters into the final theme map.
 Return JSON only:
 [
   {
+    "clusterId": "cluster id from input",
     "title": "theme title",
-    "overview": "state of affairs: the mechanism, why it matters now, and what seems true at this moment",
-    "dimensions": ["distinct way the theme shows up", "distinct way the theme shows up"],
-    "questions": ["useful unresolved question"],
-    "exploreOptions": ["one way to engage this theme"],
-    "entryIds": ["entry id"]
+    "overview": "1 to 2 sentence state of affairs",
+    "dimensions": ["distinct concrete way the theme shows up"],
+    "questions": ["genuinely open question worth testing"],
+    "exploreOptions": ["one useful way to explore the theme"]
   }
 ]
 
-Rules:
-- Return the real set of important themes. Do not target a number for its own sake.
-- For 10+ entries, prefer a richer map. Usually 5 to 9 themes is better than 2 or 3 giant umbrellas if the material supports it.
-- If there are 13+ entries and the material clearly supports it, returning only 2 or 3 themes is usually too collapsed.
-- Titles must be plain-English and understandable at a glance: 2 to 6 words, concrete, not academic, not overly abstract.
-- Good title examples: "Waiting for permission", "Jealousy as direction", "Distance from alignment".
-- Bad title examples: "Self-authorizing collapse in aspirational triangulation", "Identity disturbance across relational mirrors".
-- Preserve continuity in major themes when still active, but do not keep stale collapsed umbrellas just because they already exist.
-- Create a theme when it seems genuinely important, durable, or central to the user's thinking, even if it is newly emerging.
-- Do not inflate the list with weak themes just to have more themes.
-- Do not output overlapping themes that describe the same mechanism with slightly different wording. Merge overlap into the clearest single theme.
-- If there are multiple distinct strands, separate them cleanly rather than collapsing everything into one broad theme.
-- It is okay to include smaller, more specific emerging themes if they reveal an important live thread.
-- The same entry can support multiple themes. Shared supporting entries are allowed when distinct mechanisms are present.
-- Distinguish mechanism from domain. "Work" or "relationships" alone is usually not a theme; the theme is the recurring pattern inside those domains.
-- Prefer the title that best captures the mechanism, not the most impressive-sounding phrase.
-- Themes can vary in depth.
-- Use only entry IDs that are provided below.
-- Do not just repeat entry text. Synthesize.
-- Prefer psychological or decision-making patterns over broad topic tags.
-- If a broad domain like work appears, refine it into the actual thread inside the writing.
-- Prefer more granularity when a single broad theme hides multiple different mechanisms.
-- The overview, dimensions, and questions must do different jobs:
-  - overview = the mechanism and why it matters now
-  - dimensions = observable ways this pattern shows up, concrete tensions, or recurring situations
-  - questions = genuinely open lines of inquiry that are not already implied by the overview
-- Do not repeat the same sentence or paraphrase across overview, dimensions, and questions.
-- Do not just restate one recent entry in all three places.
-- If a line belongs in overview, do not repeat it in dimensions.
-- If a line is already an observation, do not rewrite it as a fake question.
-- Make dimensions and questions specific enough that clicking into the theme would feel different depending on which one the user followed.
-- Use the full spread of entries below. Do not anchor only on the dominant repeated theme if other meaningful threads are present.
-- Treat entry digests and section titles as evidence of distinct subthreads. Use them to split apart different live mechanisms instead of over-collapsing.
-- Keep overviews to 1 or 2 complete sentences max.
-- Keep each dimension and question to one sentence max.
-- Never use ellipses.
-${options?.expandAggressively ? '- The current map is too collapsed. Replace stale umbrella themes with a fuller map if the evidence supports it.' : ''}
+Critical rules:
+- The clusters are already grouped. Do not merge clusters together. Do not split clusters apart.
+- Preserve every input clusterId exactly.
+- Use only the supporting entries attached to each cluster.
+- The overview should explain the mechanism and why it matters now.
+- Do not start overview with "This theme..." or "${'${title}'} keeps showing up..."
+- Dimensions should be distinct from one another and grounded in the evidence lines.
+- Dimensions should read like coherent observations, not pasted fragments from the journal.
+- Questions should be specific to the cluster, not generic placeholders.
+- Keep everything in plain English.
+- Keep title to 2 to 6 words when possible.
+- No ellipses. No cut-off text. Use complete sentences.
+- Do not mention the number of entries unless it materially helps.
+- Do not recycle the same sentence across overview, dimensions, and questions.
 
 Memory:
-${memoryForPrompt(memoryDoc, options?.expandAggressively ? 1400 : 1800)}
+${memoryForPrompt(memoryDoc, 1400)}
 
-Entries:
-${patternEntriesForPrompt(recentEntries, 18)}
+Recent entries:
+${patternEntriesForPrompt(entries, 18)}
 
-Candidate recurring threads:
-${patternCandidates.length
-    ? patternCandidates
-        .map(
-          (candidate) =>
-            `- ${candidate.title} | entries: ${candidate.entryIds.join(', ')} | evidence: ${candidate.evidence.join(' / ')}`,
-        )
+Existing themes for continuity:
+${previousPatternsForPrompt(previousPatterns)}
+
+Clusters:
+${clusters
+    .map((cluster) => {
+      const evidenceLines = cluster.evidenceByEntry
+        .slice(0, 8)
+        .map((item) => {
+          const entry = entryMap.get(item.entryId)
+          return `  - ${item.entryId} | ${clipForPrompt(item.entryTitle, 60)} | ${clipForPrompt(entry?.summary ?? '', 130)} | evidence: ${clipForPrompt(item.evidence, 170)}`
+        })
         .join('\n')
-    : 'None'}
-
-Existing themes to preserve when still active:
-${previousPatternsForPrompt(continuityPatterns)}`
+      return [
+        `Cluster ID: ${cluster.clusterId}`,
+        `Tentative title: ${cluster.title}`,
+        `Entry IDs: ${cluster.entryIds.join(', ')}`,
+        `Suggested questions: ${buildQuestionsForTheme(cluster.title).join(' / ')}`,
+        'Supporting evidence:',
+        evidenceLines || '  - None',
+      ].join('\n')
+    })
+    .join('\n\n')}`
 
   const response = await anthropic.messages.create({
     model: config.anthropicModel,
-    max_tokens: options?.expandAggressively ? 2100 : 1800,
+    max_tokens: 2200,
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -1664,28 +1570,44 @@ ${previousPatternsForPrompt(continuityPatterns)}`
 
   const parsed = parseJsonFromText<
     Array<{
+      clusterId?: string
       title?: string
       overview?: string
       dimensions?: string[]
       questions?: string[]
       exploreOptions?: string[]
-      entryIds?: string[]
     }>
   >(text)
 
-  return {
-    rawText: text,
-    patterns: (parsed ?? [])
-      .filter((item) => item.title && item.overview)
-      .map((item) => ({
-        title: simplifyPatternTitle(item.title!.trim()),
-        overview: cleanTruncatedEnding(item.overview!),
-        dimensions: (item.dimensions ?? []).map((signal) => cleanTruncatedEnding(signal)).filter(Boolean),
-        questions: (item.questions ?? []).map((question) => cleanTruncatedEnding(question)).filter(Boolean),
-        exploreOptions: (item.exploreOptions ?? []).map((option) => cleanTruncatedEnding(option)).filter(Boolean).slice(0, 4),
-        entryIds: (item.entryIds ?? []).filter(Boolean),
-      })),
+  if (!parsed) {
+    return { rawText: text, patterns: [] }
   }
+
+  const patterns = clusters.flatMap((cluster) => {
+    const enriched = parsed.find((item) => item.clusterId === cluster.clusterId)
+    if (!enriched?.title || !enriched.overview) return []
+
+    const pattern = {
+      title: simplifyPatternTitle(enriched.title),
+      overview: cleanTruncatedEnding(enriched.overview),
+      dimensions: dedupePatternLines(
+        (enriched.dimensions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean),
+        enriched.overview,
+      ).slice(0, 4),
+      questions: dedupePatternLines(
+        (enriched.questions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean),
+        `${enriched.overview}\n${(enriched.dimensions ?? []).join('\n')}`,
+      ).slice(0, 3),
+      exploreOptions: dedupePatternLines(
+        (enriched.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean),
+      ).slice(0, 3),
+      entryIds: cluster.entryIds,
+    }
+
+    return enrichedPatternLooksWeak(pattern) ? [] : [pattern]
+  })
+
+  return { rawText: text, patterns }
 }
 
 function reconcilePatterns(
@@ -1734,124 +1656,33 @@ export async function buildPatterns(
   previousPatterns: PatternSection[] = [],
 ): Promise<PatternSection[]> {
   const recentEntries = entries.slice(0, 18)
+  const clusters = buildPatternClusters(recentEntries)
   const deterministicPatterns = buildDeterministicPatterns(recentEntries, previousPatterns)
-  if (!anthropic || !patternsLookWeak(deterministicPatterns, recentEntries.length)) {
+  if (!anthropic || !clusters.length) {
     return deterministicPatterns
   }
 
-  const heuristics = [
-    {
-      id: 'pattern-validation',
-      test: /validation|qualified|admired|capable|authoriz|chosen|recognized|idealiz/i,
-      title: 'Borrowing certainty from admired people',
-      question: 'Where are you still using another person as proof of your own worth or direction?',
-    },
-    {
-      id: 'pattern-delay',
-      test: /stuck|delay|avoid|waiting|certainty|clarity|analysis/i,
-      title: 'Waiting for certainty before visible action',
-      question: 'What real move would create more information than more reflection?',
-    },
-    {
-      id: 'pattern-alignment',
-      test: /alignment|surrender|spiritual|meaning|distance/i,
-      title: 'Drift from alignment and how you notice it',
-      question: 'What conditions seem to bring you closer to alignment, and which pull you away?',
-    },
-  ]
+  const enriched = await enrichPatternClustersWithModel(
+    memoryDoc,
+    recentEntries,
+    previousPatterns,
+    clusters,
+  ).catch(() => null)
 
-  const heuristicMatches = heuristics
-    .map((heuristic) => {
-      const matched = recentEntries.filter((entry) => heuristic.test.test(`${entry.summary} ${entry.rawText}`))
-      return { heuristic, matched }
-    })
-    .filter((item) => item.matched.length)
-
-  const heuristicPatterns = heuristicMatches.slice(0, 6).map(({ heuristic, matched }) => ({
-    title: heuristic.title,
-    overview: matched[0]?.summary ?? buildSummary(matched[0]?.rawText ?? ''),
-    dimensions: matched.slice(0, 4).map((entry) => entry.summary),
-    questions: [heuristic.question],
-    exploreOptions: [`Trace how "${heuristic.title.toLowerCase()}" has evolved across entries`],
-    entryIds: matched.map((entry) => entry.id),
-  }))
-
-  if (anthropic && entries.length) {
-    let rawPatternText = ''
-    try {
-      const patternCandidates = aggregatePatternCandidates(recentEntries)
-      const synthesized = await synthesizePatternsWithModel(
-        memoryDoc,
-        recentEntries,
-        previousPatterns,
-        patternCandidates,
-      )
-      rawPatternText = synthesized?.rawText ?? ''
-
-      if (synthesized?.patterns.length) {
-        let paddedPatterns = dedupeAndRefinePatterns(synthesized.patterns)
-
-        if (shouldForcePatternExpansion(paddedPatterns, recentEntries, patternCandidates.length)) {
-          const expanded = await synthesizePatternsWithModel(
-            memoryDoc,
-            recentEntries,
-            previousPatterns,
-            patternCandidates,
-            {
-              expandAggressively: true,
-            },
-          ).catch(() => null)
-
-          if (expanded?.patterns.length) {
-            rawPatternText = expanded.rawText
-            paddedPatterns = dedupeAndRefinePatterns(expanded.patterns)
-          }
-        }
-
-        for (const heuristicPattern of heuristicPatterns) {
-          const overlapsExisting = paddedPatterns.some(
-            (pattern) =>
-              normalizePatternTitle(pattern.title) === normalizePatternTitle(heuristicPattern.title) ||
-              heuristicPattern.entryIds.some((entryId) => pattern.entryIds.includes(entryId)),
-          )
-
-          if (!overlapsExisting && paddedPatterns.length < 6) {
-            paddedPatterns.push(heuristicPattern)
-          }
-        }
-
-        const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))
-        return reconciled
-          .sort((left, right) => {
-            const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
-            const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
-            return rightScore - leftScore
-          })
-          .slice(0, 9)
-      }
-
-      if (rawPatternText) {
-        throw new Error('Pattern synthesis returned no usable themes')
-      }
-    } catch {
-      const repaired = await repairPatternJson(rawPatternText, memoryDoc, recentEntries, previousPatterns).catch(() => null)
-      if (repaired?.length) {
-        const paddedPatterns = dedupeAndRefinePatterns(repaired)
-        const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(paddedPatterns))
-        return reconciled
-          .sort((left, right) => {
-            const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
-            const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
-            return rightScore - leftScore
-          })
-          .slice(0, 9)
-      }
+  if (enriched?.patterns.length) {
+    const reconciled = reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(enriched.patterns))
+    if (!patternsLookWeak(reconciled, recentEntries.length)) {
+      return reconciled
+        .sort((left, right) => {
+          const rightScore = right.entryCount * 3 + (right.status === 'deepening' ? 2 : right.status === 'active' ? 1 : 0)
+          const leftScore = left.entryCount * 3 + (left.status === 'deepening' ? 2 : left.status === 'active' ? 1 : 0)
+          return rightScore - leftScore
+        })
+        .slice(0, 9)
     }
   }
 
-  return deterministicPatterns.length
-    ? deterministicPatterns
-    : reconcilePatterns(previousPatterns, heuristicPatterns).slice(0, 9)
+  return deterministicPatterns
 }
 
 export async function generateReply(
