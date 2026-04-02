@@ -1211,6 +1211,25 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
   const candidates: LocalThemeCandidate[] = []
 
   for (const entry of entries) {
+    const sourceLines = [
+      ...splitIntoCandidateSentences(entry.rawText),
+      ...buildSourceMoments(entry.rawText, 8),
+      entry.summary,
+      ...(entry.analysis?.entryDigest ?? []),
+    ]
+      .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
+      .filter(Boolean)
+
+    const familyCandidates = THEME_FAMILIES.flatMap((family) => {
+      const evidence = sourceLines.find((line) => family.test.test(line))
+      if (!evidence) return []
+      return [{
+        title: family.title,
+        evidence: firstSentence(evidence, 180) || evidence,
+        weight: 6,
+      }]
+    })
+
     const sectionCandidates =
       entry.analysis?.sections
         ?.filter((section) => !isGenericSectionTitle(section.title))
@@ -1239,7 +1258,7 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
           }
         }) ?? []
 
-    const combined = [...signalCandidates, ...sectionCandidates, ...digestCandidates]
+    const combined = [...familyCandidates, ...signalCandidates, ...sectionCandidates, ...digestCandidates]
       .filter((candidate) => candidate.title && candidate.evidence)
       .sort((left, right) => right.weight - left.weight)
       .slice(0, 8)
@@ -1248,7 +1267,7 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
     const uncategorized: Array<(typeof combined)[number]> = []
 
     for (const candidate of combined) {
-      const family = themeFamilyForText(`${candidate.title} ${candidate.evidence}`)
+      const family = themeFamilyForText(candidate.evidence)
       if (!family) {
         uncategorized.push(candidate)
         continue
@@ -1268,7 +1287,7 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
     )
 
     for (const candidate of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 2)]) {
-      const family = themeFamilyForText(`${candidate.title} ${candidate.evidence}`)
+      const family = themeFamilyForText(candidate.evidence)
       candidates.push({
         title: candidate.title,
         entryId: entry.id,
@@ -1298,6 +1317,9 @@ function buildPatternClusters(entries: JournalEntry[]) {
 
   for (const candidate of localCandidates) {
     const existing = clusters.find((cluster) => {
+      if (cluster.familyKey || candidate.familyKey) {
+        return cluster.familyKey === candidate.familyKey
+      }
       if (candidate.familyKey && cluster.familyKey === candidate.familyKey) return true
       const sameTitle = normalizePatternTitle(cluster.title) === normalizePatternTitle(candidate.title)
       const titleSimilar =
@@ -1379,9 +1401,18 @@ function buildPatternClusters(entries: JournalEntry[]) {
   })
 }
 
+function evidenceBelongsToCluster(cluster: PatternClusterDraft, evidence: string) {
+  if (!cluster.familyKey) return true
+  const family = THEME_FAMILIES.find((item) => item.key === cluster.familyKey)
+  return family ? family.test.test(evidence) : true
+}
+
 function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
   const evidence = dedupePatternLines(
-    cluster.evidenceByEntry.map((item) => cleanTruncatedEnding(item.evidence)).filter(Boolean),
+    cluster.evidenceByEntry
+      .map((item) => cleanTruncatedEnding(item.evidence))
+      .filter(Boolean)
+      .filter((item) => evidenceBelongsToCluster(cluster, item)),
   ).slice(0, 4)
 
   return {
