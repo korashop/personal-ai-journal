@@ -97,7 +97,7 @@ function normalizeWhitespace(text: string) {
 }
 
 const DANGLING_ENDING_PATTERN =
-  /\s+\b(?:about|after|and|around|as|at|because|before|being|but|despite|for|from|if|in|into|like|of|on|or|over|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i
+  /\s+\b(?:about|after|and|around|as|at|because|before|being|but|despite|for|from|if|in|into|like|of|on|or|over|rather|so|than|that|the|to|versus|we|while|which|who|with|without)\b\s*$/i
 
 function cleanTruncatedEnding(text: string) {
   let normalized = text
@@ -1125,6 +1125,7 @@ function evidenceLooksFragmentary(line: string) {
     !clean ||
     words.length < 5 ||
     /(?:^not like\b|^on [A-Z][a-z]+\b|^through\b)/i.test(clean) ||
+    /\b(?:which|who|we|i)\s*$/i.test(clean) ||
     /\b(?:img|heic|transcribed journal page)\b/i.test(clean) ||
     DANGLING_ENDING_PATTERN.test(clean)
   )
@@ -1229,19 +1230,56 @@ function chooseBestClusterTitle(
 function buildOverviewFromCluster(
   title: string,
   entryCount: number,
+  familyKey: string | undefined,
   evidence: string[],
 ) {
   const cleanEvidence = evidence
     .map((item) => cleanTruncatedEnding(item))
     .filter((item) => item && !evidenceLooksFragmentary(item))
 
-  const lead = cleanEvidence[0] ?? ''
-  const second = cleanEvidence.find((item, index) =>
-    index > 0 && semanticSimilarity(item, lead) < 0.42,
+  const familyOverviews: Record<string, string> = {
+    'self-authorization':
+      'A recurring threshold is feeling like you need to prove capability, clarify credentials, or pre-justify the ask before saying directly what you want.',
+    'outward-proof':
+      'This theme is about outsourcing conviction to admired people or external signs, then using their choices, attention, or status as evidence for whether your own desire is legitimate.',
+    'alignment-drift':
+      'You keep tracking a gap between the life-state that feels aligned or surrendered and the ways daily choices, work modes, or relationships pull you away from that state.',
+    'output-anchor':
+      'Shipped output keeps appearing as an anchor for meaning: you want days to feel defined by making something real, and you notice how consuming or circling ideas can become a substitute.',
+    'relationship-attunement':
+      'The recurring need here is not just closeness, but felt attunement: love has to feel expressive, specific, and deeply seen, and the Dani reflections seem to crystallize that standard.',
+    'collaboration-threshold':
+      'This theme is about moving from lone effort into the “who not how” question: what kind of collaborators, partners, or team structure would actually let the work become bigger and more real.',
+    'family-mission':
+      'Family shows up as more than a generic future goal—it reads like a life-orienting mission, with a live question about how to build toward that deliberately while staying in surrender.',
+    'depth-craft':
+      'You keep contrasting broad, shallow motion with a hunger for depth, craft, and sustained immersion in something you can really follow all the way through.',
+    'certainty-delay':
+      'This theme is about waiting for more certainty, legitimacy, or readiness before visible action, and then feeling the cost of that delay once the desire becomes clearer.',
+    'physical-pull':
+      'There is a repeated pull toward physical, tactile, embodied forms of making—projects, sport, coaching, or collage—that seem to carry a different kind of energy than abstract thinking alone.',
+    'missed-window':
+      'A recurring story here is about missed timing: replaying earlier moments when you did not act, and trying to separate useful signal from a self-punishing sense that a window has already closed.',
+  }
+
+  const intro =
+    (familyKey ? familyOverviews[familyKey] : '') ||
+    (entryCount >= 2
+      ? `${title} keeps recurring across ${entryCount} entries, but the underlying shape is still emerging.`
+      : `${title} is present in this entry, but the underlying shape is still emerging.`)
+
+  const firstExample = cleanEvidence[0] ?? ''
+  const secondExample = cleanEvidence.find((item, index) =>
+    index > 0 && semanticSimilarity(item, firstExample) < 0.42,
   ) ?? ''
-  const parts = [lead, entryCount >= 2 ? second : '']
+  const parts = [
+    intro,
+    firstExample ? `Recent evidence: ${/[.!?]$/.test(firstExample) ? firstExample : `${firstExample}.`}` : '',
+    secondExample && semanticSimilarity(secondExample, firstExample) < 0.42
+      ? (/[.!?]$/.test(secondExample) ? secondExample : `${secondExample}.`)
+      : '',
+  ]
     .filter(Boolean)
-    .map((item) => (/[.!?]$/.test(item) ? item : `${item}.`))
 
   return cleanTruncatedEnding(parts.join(' ')) || title
 }
@@ -1464,7 +1502,7 @@ function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
 
   return {
     title: cluster.title,
-    overview: buildOverviewFromCluster(cluster.title, cluster.entryIds.length, evidence),
+    overview: buildOverviewFromCluster(cluster.title, cluster.entryIds.length, cluster.familyKey, evidence),
     dimensions: evidence,
     questions: buildQuestionsForTheme(cluster.title),
     exploreOptions: [
