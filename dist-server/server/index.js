@@ -89,7 +89,7 @@ function triggerDerivedRefresh(userId) {
 function shouldRefreshPatterns(entriesCount, patterns) {
     if (!patterns.length)
         return true;
-    if (entriesCount >= 10 && patterns.length <= 4)
+    if (entriesCount >= 10 && patterns.length <= 5)
         return true;
     const singletonCount = patterns.filter((pattern) => (pattern.entryCount ?? 0) <= 1).length;
     if (patterns.length >= 5 && singletonCount / patterns.length >= 0.6)

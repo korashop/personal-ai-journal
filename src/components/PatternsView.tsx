@@ -117,7 +117,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   }, [selectedPatternId])
 
   useEffect(() => {
-    if (patterns.length > 4 || entries.length < 10) {
+    if (patterns.length > 5 || entries.length < 10) {
       setStaleSyncAttempts(0)
       return
     }

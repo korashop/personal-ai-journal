@@ -952,6 +952,28 @@ function bestFamilyEvidenceLine(sourceLines, family) {
         .filter((item) => item.line && item.score >= 2)
         .sort((left, right) => right.score - left.score || right.line.length - left.line.length)[0]?.line ?? '';
 }
+function bestOpenThemeEvidenceLine(sourceLines) {
+    return sourceLines
+        .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
+        .filter((line) => line && !evidenceLooksFragmentary(line))
+        .map((line) => {
+        const wordCount = line.split(' ').filter(Boolean).length;
+        let score = 0;
+        if (wordCount >= 8 && wordCount <= 42)
+            score += 3;
+        if (/[.!?]$/.test(line))
+            score += 2;
+        if (/\b(i want|i feel|i need|you want|you feel|the pattern|because|rather than|instead of)\b/i.test(line))
+            score += 2;
+        if (/^(what|why|how)\b/i.test(line))
+            score -= 1;
+        if (/\b(?:the journal|this theme|same pattern|same idea)\b/i.test(line))
+            score -= 2;
+        return { line, score };
+    })
+        .filter((item) => item.score >= 2)
+        .sort((left, right) => right.score - left.score || right.line.length - left.line.length)[0]?.line ?? '';
+}
 function semanticToken(token) {
     if (!token)
         return '';
@@ -1358,10 +1380,14 @@ function buildLocalThemeCandidates(entries) {
             ?.filter((section) => !isGenericSectionTitle(section.title))
             .flatMap((section) => {
             const title = simplifyPatternTitle(section.title);
-            const evidence = bestFamilyEvidenceLine(splitIntoCandidateSentences(section.content), themeFamilyForText(title) ?? { key: '', title, test: /$^/, questions: [] });
+            const titleFamily = themeFamilyForText(title);
+            const sectionLines = splitIntoCandidateSentences(section.content);
+            const evidence = titleFamily
+                ? bestFamilyEvidenceLine(sectionLines, titleFamily)
+                : bestOpenThemeEvidenceLine([section.content, ...sectionLines]);
             if (!title || !evidence || evidenceLooksFragmentary(evidence))
                 return [];
-            return [{ title, evidence, weight: 3 }];
+            return [{ title, evidence, weight: titleFamily ? 3 : 4 }];
         }) ?? [];
         const combined = [...familyCandidates, ...sectionCandidates]
             .filter((candidate) => candidate.title && candidate.evidence)
@@ -1383,7 +1409,7 @@ function buildLocalThemeCandidates(entries) {
         }
         const distinctUncategorized = uncategorized.filter((candidate, index) => uncategorized.findIndex((other) => normalizePatternTitle(other.title) === normalizePatternTitle(candidate.title) ||
             semanticSimilarity(`${other.title} ${other.evidence}`, `${candidate.title} ${candidate.evidence}`) >= 0.72) === index);
-        for (const candidate of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 2)]) {
+        for (const candidate of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 4)]) {
             const family = themeFamilyForText(candidate.evidence);
             candidates.push({
                 title: candidate.title,
