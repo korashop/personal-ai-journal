@@ -26,6 +26,26 @@ export declare function rewriteMemoryDoc(currentMemory: MemoryDocumentRecord | n
 export declare function simplifyPatternTitle(title: string): string;
 export declare function chooseResurfacingCard(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], highlights: HighlightRecord[]): ResurfacingCard | null;
 export declare function buildPatterns(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], previousPatterns?: PatternSection[]): Promise<PatternSection[]>;
+export declare function buildPatternDebugReport(entries: JournalEntry[]): {
+    clusterId: string;
+    title: string;
+    familyKey: string;
+    entryIds: string[];
+    evidenceByEntry: {
+        entryId: string;
+        entryTitle: string;
+        evidence: string;
+        weight: number;
+    }[];
+    fallbackPattern: {
+        title: string;
+        overview: string;
+        dimensions: string[];
+        questions: string[];
+        exploreOptions: string[];
+        entryIds: string[];
+    };
+}[];
 export declare function generateReply(entry: JournalEntry, userReply: string, context: Context): Promise<string>;
 export declare function generatePatternReply(pattern: PatternSection, relatedEntries: JournalEntry[], memoryDoc: MemoryDocumentRecord | null, userMessage: string): Promise<string>;
 export declare function integratePatternReplyIntoMemory(currentMemory: MemoryDocumentRecord | null, pattern: PatternSection, userMessage: string, answer: string): Promise<string>;

@@ -884,6 +884,13 @@ function themeFamilyForText(text) {
         return null;
     return THEME_FAMILIES.find((family) => family.test.test(cleaned)) ?? null;
 }
+function themeCandidateIsSelfConsistent(title, evidence) {
+    const titleFamily = themeFamilyForText(title);
+    if (!titleFamily)
+        return true;
+    const evidenceFamily = themeFamilyForText(evidence);
+    return evidenceFamily?.key === titleFamily.key;
+}
 function semanticToken(token) {
     if (!token)
         return '';
@@ -1033,6 +1040,7 @@ function buildLocalThemeCandidates(entries) {
         }) ?? [];
         const combined = [...familyCandidates, ...signalCandidates, ...sectionCandidates, ...digestCandidates]
             .filter((candidate) => candidate.title && candidate.evidence)
+            .filter((candidate) => themeCandidateIsSelfConsistent(candidate.title, candidate.evidence))
             .sort((left, right) => right.weight - left.weight)
             .slice(0, 8);
         const familyBuckets = new Map();
@@ -1398,6 +1406,16 @@ export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
         }
     }
     return deterministicPatterns;
+}
+export function buildPatternDebugReport(entries) {
+    return buildPatternClusters(entries.slice(0, 18)).map((cluster) => ({
+        clusterId: cluster.clusterId,
+        title: cluster.title,
+        familyKey: cluster.familyKey ?? null,
+        entryIds: cluster.entryIds,
+        evidenceByEntry: cluster.evidenceByEntry,
+        fallbackPattern: buildDeterministicPatternFromCluster(cluster),
+    }));
 }
 export async function generateReply(entry, userReply, context) {
     if (!anthropic) {

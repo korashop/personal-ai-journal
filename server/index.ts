@@ -10,6 +10,7 @@ import { config } from './config.js'
 import {
   buildAnalysisInput,
   buildEntryTitle,
+  buildPatternDebugReport,
   buildPatterns,
   buildSummary,
   chooseResurfacingCard,
@@ -201,6 +202,29 @@ app.get('/api/bootstrap', async (request, response, next) => {
       ),
       patterns,
       mode,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/patterns/debug', async (_request, response, next) => {
+  try {
+    const { store } = getStore()
+    const userId = config.demoUserId
+    const data = await withTransientRetry(() => store.getBootstrap(userId))
+
+    response.json({
+      storedPatterns: data.patterns.map((pattern) => ({
+        id: pattern.id,
+        title: pattern.title,
+        status: pattern.status,
+        entryCount: pattern.entryCount,
+        entryIds: pattern.entryIds,
+        overview: pattern.overview,
+        dimensions: pattern.dimensions,
+      })),
+      clusterDebug: buildPatternDebugReport(data.patternEntries),
     })
   } catch (error) {
     next(error)

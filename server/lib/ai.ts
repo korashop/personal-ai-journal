@@ -1098,6 +1098,13 @@ function themeFamilyForText(text: string) {
   return THEME_FAMILIES.find((family) => family.test.test(cleaned)) ?? null
 }
 
+function themeCandidateIsSelfConsistent(title: string, evidence: string) {
+  const titleFamily = themeFamilyForText(title)
+  if (!titleFamily) return true
+  const evidenceFamily = themeFamilyForText(evidence)
+  return evidenceFamily?.key === titleFamily.key
+}
+
 function semanticToken(token: string) {
   if (!token) return ''
   if (/^(authoriz|authoris|permiss|qualif|capab|skill|impost|entitl)/.test(token)) return 'authorization'
@@ -1260,6 +1267,7 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
 
     const combined = [...familyCandidates, ...signalCandidates, ...sectionCandidates, ...digestCandidates]
       .filter((candidate) => candidate.title && candidate.evidence)
+      .filter((candidate) => themeCandidateIsSelfConsistent(candidate.title, candidate.evidence))
       .sort((left, right) => right.weight - left.weight)
       .slice(0, 8)
 
@@ -1726,6 +1734,17 @@ export async function buildPatterns(
   }
 
   return deterministicPatterns
+}
+
+export function buildPatternDebugReport(entries: JournalEntry[]) {
+  return buildPatternClusters(entries.slice(0, 18)).map((cluster) => ({
+    clusterId: cluster.clusterId,
+    title: cluster.title,
+    familyKey: cluster.familyKey ?? null,
+    entryIds: cluster.entryIds,
+    evidenceByEntry: cluster.evidenceByEntry,
+    fallbackPattern: buildDeterministicPatternFromCluster(cluster),
+  }))
 }
 
 export async function generateReply(
