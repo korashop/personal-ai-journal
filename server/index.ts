@@ -102,7 +102,10 @@ async function refreshDerivedState(userId: string) {
   const memoryContent = await rewriteMemoryDoc(bootstrap.memoryDoc, recentEntries.slice(0, 8))
   await store.updateMemory(userId, memoryContent)
   const nextBootstrap = await store.getBootstrap(userId)
-  const patterns = await buildPatterns(nextBootstrap.memoryDoc, nextBootstrap.patternEntries, nextBootstrap.patterns)
+  const previousPatterns = shouldRefreshPatterns(nextBootstrap.patternEntries.length, nextBootstrap.patterns)
+    ? []
+    : nextBootstrap.patterns
+  const patterns = await buildPatterns(nextBootstrap.memoryDoc, nextBootstrap.patternEntries, previousPatterns)
   await store.updatePatterns(userId, patterns)
 }
 
@@ -130,6 +133,7 @@ function shouldRefreshPatterns(
 
   return patterns.some((pattern) =>
     /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
+    /\bkeeps showing up across \d+ entr/i.test(pattern.overview) ||
     /(?:\.{3,}|…)\s*$/.test(pattern.title ?? '') ||
     /(?:\.{3,}|…)\s*$/.test(pattern.overview) ||
     pattern.dimensions.some((dimension) => /(?:\.{3,}|…)\s*$/.test(dimension)) ||
@@ -141,6 +145,9 @@ function triggerPatternRefreshAfterReply(userId: string, pattern: z.infer<typeof
   void (async () => {
     const { store } = getStore()
     const bootstrap = await store.getBootstrap(userId)
+    const previousPatterns = shouldRefreshPatterns(bootstrap.patternEntries.length, bootstrap.patterns)
+      ? []
+      : bootstrap.patterns
 
     const nextMemory = await integratePatternReplyIntoMemory(
       bootstrap.memoryDoc,
@@ -155,7 +162,7 @@ function triggerPatternRefreshAfterReply(userId: string, pattern: z.infer<typeof
     )
 
     const memoryDoc = await store.updateMemory(userId, nextMemory)
-    const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, bootstrap.patterns)
+    const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, previousPatterns)
     await store.updatePatterns(userId, patterns)
   })().catch((error) => {
     console.error('Pattern refresh after reply failed', error)
@@ -173,9 +180,10 @@ app.get('/api/bootstrap', async (request, response, next) => {
     const userId = config.demoUserId
     const data = await withTransientRetry(() => store.getBootstrap(userId, selectedEntryId))
     const needsPatternRefresh = shouldRefreshPatterns(data.patternEntries.length, data.patterns)
+    const previousPatterns = needsPatternRefresh ? [] : data.patterns
     const patterns =
       !data.patterns.length || needsPatternRefresh
-        ? await buildPatterns(data.memoryDoc, data.patternEntries, data.patterns)
+        ? await buildPatterns(data.memoryDoc, data.patternEntries, previousPatterns)
         : data.patterns
 
     if ((!data.patterns.length || needsPatternRefresh) && patterns.length) {
