@@ -6,6 +6,14 @@ const anthropic = hasAnthropicConfig ? new Anthropic({ apiKey: config.anthropicA
 function clip(text, maxLength = 220) {
     return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
 }
+function clipAtWord(text, maxLength = 220) {
+    if (text.length <= maxLength)
+        return text;
+    const sliced = text.slice(0, maxLength);
+    const lastSpace = sliced.lastIndexOf(' ');
+    const clipped = lastSpace > 30 ? sliced.slice(0, lastSpace) : sliced;
+    return clipped.trim();
+}
 function clipForPrompt(text, maxLength) {
     const cleaned = normalizeWhitespace(text);
     return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength).trim()}...` : cleaned;
@@ -263,8 +271,11 @@ function firstSentence(text, maxLength = 140) {
     const cleaned = cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(text)));
     if (!cleaned)
         return '';
-    const sentence = cleaned.split(/(?<=[.!?])\s+/)[0] ?? cleaned;
-    return clip(sentence, maxLength);
+    const sentence = (cleaned.split(/(?<=[.!?])\s+/)[0] ?? cleaned)
+        .replace(/:\s*-\s*[A-Za-z]?$/g, '')
+        .replace(/\s*-\s*[A-Za-z]$/g, '')
+        .trim();
+    return clipAtWord(sentence, maxLength);
 }
 function buildEntryDigestFromSections(sections, rawText) {
     const derived = sections
@@ -951,6 +962,53 @@ function buildDeterministicPatterns(entries, previousPatterns) {
     })
         .slice(0, 8);
 }
+function aggregatePatternCandidates(entries) {
+    const localCandidates = buildLocalThemeCandidates(entries);
+    const grouped = [];
+    for (const candidate of localCandidates) {
+        const existing = grouped.find((group) => {
+            const sameTitle = normalizePatternTitle(group.title) === normalizePatternTitle(candidate.title);
+            const similar = themeTitleSimilarity(group.title, candidate.title) >= 0.72;
+            return sameTitle || similar;
+        });
+        if (!existing) {
+            grouped.push({
+                title: candidate.title,
+                entryIds: [candidate.entryId],
+                evidence: [candidate.evidence],
+            });
+            continue;
+        }
+        if (!existing.entryIds.includes(candidate.entryId)) {
+            existing.entryIds.push(candidate.entryId);
+        }
+        if (!existing.evidence.includes(candidate.evidence)) {
+            existing.evidence.push(candidate.evidence);
+        }
+    }
+    return grouped
+        .map((group) => ({
+        title: simplifyPatternTitle(group.title),
+        entryIds: group.entryIds,
+        evidence: dedupePatternLines(group.evidence.map((item) => cleanTruncatedEnding(item))).slice(0, 4),
+    }))
+        .sort((left, right) => right.entryIds.length - left.entryIds.length)
+        .slice(0, 18);
+}
+function patternsLookWeak(patterns, entriesCount) {
+    if (!patterns.length)
+        return true;
+    if (entriesCount >= 10 && patterns.length <= 3)
+        return true;
+    const singletonCount = patterns.filter((pattern) => pattern.entryCount <= 1).length;
+    if (patterns.length >= 5 && singletonCount / patterns.length >= 0.6)
+        return true;
+    if (patterns.every((pattern) => pattern.status === 'emerging'))
+        return true;
+    return patterns.some((pattern) => looksTruncatedPatternText(pattern.title) ||
+        looksTruncatedPatternText(pattern.overview) ||
+        pattern.dimensions.some(looksTruncatedPatternText));
+}
 function patternCoverageRatio(patterns, entries) {
     if (!entries.length)
         return 0;
@@ -1069,52 +1127,6 @@ ${previousPatternsForPrompt(continuityPatterns)}`;
         })),
     };
 }
-async function extractPatternCandidates(memoryDoc, recentEntries) {
-    if (!anthropic || !recentEntries.length)
-        return [];
-    const prompt = `Extract candidate recurring threads from this journal history.
-Return JSON only:
-[
-  {
-    "title": "short mechanism or live thread",
-    "entryIds": ["entry id"],
-    "evidence": ["concrete observation from the journal"]
-  }
-]
-
-Rules:
-- Return 8 to 14 candidate threads when the material supports it.
-- Prefer concrete recurring mechanisms, tensions, or active live threads.
-- Avoid umbrella categories like "work" or "relationships" by themselves.
-- A candidate can be emerging and only have 1 or 2 entries if it feels clearly alive.
-- Do not collapse distinct threads into one broad title.
-- Titles should be 2 to 6 words, plain English.
-- Evidence lines should be concrete, short, and not end with ellipses.
-- Use only the entry IDs provided below.
-
-Memory:
-${memoryForPrompt(memoryDoc, 1200)}
-
-Entries:
-${patternEntriesForPrompt(recentEntries, 18)}`;
-    const response = await anthropic.messages.create({
-        model: config.anthropicModel,
-        max_tokens: 1500,
-        messages: [{ role: 'user', content: prompt }],
-    });
-    const text = response.content
-        .filter((item) => item.type === 'text')
-        .map((item) => item.text)
-        .join('\n');
-    const parsed = parseJsonFromText(text);
-    return (parsed ?? [])
-        .filter((item) => item.title && item.entryIds?.length)
-        .map((item) => ({
-        title: simplifyPatternTitle(item.title.trim()),
-        entryIds: (item.entryIds ?? []).filter(Boolean),
-        evidence: (item.evidence ?? []).map((line) => cleanTruncatedEnding(line)).filter(Boolean).slice(0, 3),
-    }));
-}
 function reconcilePatterns(previousPatterns, nextPatterns) {
     const timestamp = new Date().toISOString();
     const unusedPrevious = [...previousPatterns];
@@ -1145,7 +1157,7 @@ function reconcilePatterns(previousPatterns, nextPatterns) {
 export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
     const recentEntries = entries.slice(0, 18);
     const deterministicPatterns = buildDeterministicPatterns(recentEntries, previousPatterns);
-    if (deterministicPatterns.length >= 4 || !anthropic) {
+    if (!anthropic || !patternsLookWeak(deterministicPatterns, recentEntries.length)) {
         return deterministicPatterns;
     }
     const heuristics = [
@@ -1185,7 +1197,7 @@ export async function buildPatterns(memoryDoc, entries, previousPatterns = []) {
     if (anthropic && entries.length) {
         let rawPatternText = '';
         try {
-            const patternCandidates = await extractPatternCandidates(memoryDoc, recentEntries);
+            const patternCandidates = aggregatePatternCandidates(recentEntries);
             const synthesized = await synthesizePatternsWithModel(memoryDoc, recentEntries, previousPatterns, patternCandidates);
             rawPatternText = synthesized?.rawText ?? '';
             if (synthesized?.patterns.length) {
