@@ -229,6 +229,37 @@ function buildEntryDigest(rawText: string) {
   return cleaned.slice(0, 4).map((line) => clip(line, 140))
 }
 
+function looksAbstractDigestLine(line: string) {
+  const normalized = normalizeWhitespace(stripMarkdown(line)).toLowerCase()
+  return (
+    /^the\s+\w+\s+that\s+\w+/.test(normalized) ||
+    normalized.includes('tension') ||
+    normalized.includes('thread') ||
+    normalized.includes('mechanism') ||
+    normalized.includes('dynamic')
+  )
+}
+
+function finalizeEntryDigest(candidateLines: string[] | undefined, rawText: string) {
+  const sourceLines = buildEntryDigest(rawText)
+  const aiLines = (candidateLines ?? [])
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !looksAbstractDigestLine(line))
+
+  const merged = [...sourceLines, ...aiLines]
+  const deduped: string[] = []
+
+  for (const line of merged) {
+    const normalized = normalizeWhitespace(line).toLowerCase()
+    if (!normalized) continue
+    if (deduped.some((existing) => normalizeWhitespace(existing).toLowerCase() === normalized)) continue
+    deduped.push(line)
+  }
+
+  return deduped.slice(0, 5)
+}
+
 function memoryForPrompt(memoryDoc: MemoryDocumentRecord | null, maxLength = 2400) {
   return memoryDoc?.content ? clipForPrompt(memoryDoc.content, maxLength) : 'No memory document yet.'
 }
@@ -417,7 +448,7 @@ ${malformedResponse}`
   return {
     title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), rawText, tags),
     summary: deriveDisplaySummary(parsed.summary?.trim(), rawText),
-    entryDigest: (parsed.entryDigest ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+    entryDigest: finalizeEntryDigest(parsed.entryDigest, rawText),
     contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
     sections,
     exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
@@ -466,6 +497,8 @@ Rules:
 - The title should sound like the real center of gravity of the entry, not the first sentence and not "Claude's analysis..."
 - The summary should help the user recognize what this entry is actually about later, in 1 or 2 sentences max.
 - The entryDigest should be the fastest honest answer to "what came up here?" Use it for distinct topics, scenes, decisions, or people mentioned.
+- Keep entryDigest concrete and source-grounded. Mention real names, projects, places, or decisions when they appear.
+- Do not use abstract bullets like "the tension" or "the mechanism" when a more concrete bullet is possible.
 - Context bullets should be short, concrete, and source-oriented. Think "what was happening / what was being wrestled with", not interpretation.
 - Do not simply restate the first section in shorter form.
 - Explore options should feel like meaningful next angles, not generic prompts.
@@ -534,7 +567,7 @@ ${analysisEntryText}`
     return {
       title: deriveDisplayTitle(parsed.title?.trim() || parsed.summary?.trim(), cleanedRaw, tags),
       summary: deriveDisplaySummary(parsed.summary?.trim(), cleanedRaw),
-      entryDigest: (parsed.entryDigest ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),
+      entryDigest: finalizeEntryDigest(parsed.entryDigest, cleanedRaw),
       contextBullets: (parsed.contextBullets ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 3),
       sections,
       exploreOptions: (parsed.exploreOptions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 5),

@@ -60,6 +60,15 @@ function triggerDerivedRefresh(userId) {
         console.error('Derived refresh failed', error);
     });
 }
+function shouldRefreshPatterns(entriesCount, patterns) {
+    if (!patterns.length)
+        return true;
+    if (entriesCount >= 10 && patterns.length <= 3)
+        return true;
+    return patterns.some((pattern) => /\.{3,}\s*$/.test(pattern.overview) ||
+        pattern.dimensions.some((dimension) => /\.{3,}\s*$/.test(dimension)) ||
+        pattern.questions.some((question) => /\.{3,}\s*$/.test(question)));
+}
 function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
     void (async () => {
         const { store } = getStore();
@@ -85,10 +94,11 @@ app.get('/api/bootstrap', async (request, response, next) => {
         const { mode, store } = getStore();
         const selectedEntryId = typeof request.query.entryId === 'string' ? request.query.entryId : null;
         const data = await store.getBootstrap(config.demoUserId, selectedEntryId);
-        const patterns = data.patterns.length
-            ? data.patterns
-            : await buildPatterns(data.memoryDoc, data.patternEntries, data.patterns);
-        if (!data.patterns.length && patterns.length) {
+        const needsPatternRefresh = shouldRefreshPatterns(data.patternEntries.length, data.patterns);
+        const patterns = needsPatternRefresh
+            ? await buildPatterns(data.memoryDoc, data.patternEntries, data.patterns)
+            : data.patterns;
+        if (needsPatternRefresh && patterns.length) {
             void store.updatePatterns(config.demoUserId, patterns);
         }
         response.json({
