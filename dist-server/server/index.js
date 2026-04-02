@@ -99,12 +99,19 @@ function shouldRefreshPatterns(entriesCount, patterns) {
     const genericQuestionCount = patterns.filter((pattern) => pattern.questions.every((question) => /what keeps this theme in place right now|what concrete move would test a different way of operating here/i.test(question))).length;
     if (patterns.length >= 5 && genericQuestionCount / patterns.length >= 0.6)
         return true;
-    return patterns.some((pattern) => /^this theme (?:shows up across|is emerging around)/i.test(pattern.overview) ||
-        /\bkeeps showing up across \d+ entr/i.test(pattern.overview) ||
-        /(?:\.{3,}|…)\s*$/.test(pattern.title ?? '') ||
-        /(?:\.{3,}|…)\s*$/.test(pattern.overview) ||
-        pattern.dimensions.some((dimension) => /(?:\.{3,}|…)\s*$/.test(dimension)) ||
-        pattern.questions.some((question) => /(?:\.{3,}|…)\s*$/.test(question)));
+    const looksBrokenCopy = (text) => {
+        const clean = text.trim();
+        return (!clean ||
+            /^this theme (?:shows up across|is emerging around)/i.test(clean) ||
+            /\bkeeps showing up across \d+ entr/i.test(clean) ||
+            /(?:\.{3,}|…)\s*$/.test(clean) ||
+            /\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\s*$/i.test(clean) ||
+            (/^[A-Za-z]/.test(clean) && !/[.!?"]$/.test(clean) && clean.length > 80));
+    };
+    return patterns.some((pattern) => looksBrokenCopy(pattern.title ?? '') ||
+        looksBrokenCopy(pattern.overview) ||
+        pattern.dimensions.some((dimension) => looksBrokenCopy(dimension)) ||
+        pattern.questions.some((question) => looksBrokenCopy(question)));
 }
 function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
     void (async () => {

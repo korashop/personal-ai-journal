@@ -97,8 +97,18 @@ function normalizeWhitespace(text: string) {
 }
 
 function cleanTruncatedEnding(text: string) {
-  const normalized = text.trim().replace(/[.…]+\s*$/, '').trim()
+  let normalized = text
+    .trim()
+    .replace(/[.…]+\s*$/, '')
+    .trim()
+    .replace(/\s+\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i, '')
+    .trim()
   if (!normalized) return ''
+  while (/\s+\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i.test(normalized)) {
+    normalized = normalized
+      .replace(/\s+\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\b\s*$/i, '')
+      .trim()
+  }
   if (!/[.!?]"?$/.test(normalized)) {
     const boundary = Math.max(
       normalized.lastIndexOf('. '),
@@ -1500,7 +1510,12 @@ function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
 }
 
 function looksTruncatedPatternText(text: string) {
-  return /(?:\.{3,}|…)\s*$/.test(text.trim())
+  const clean = text.trim()
+  return (
+    /(?:\.{3,}|…)\s*$/.test(clean) ||
+    /\b(?:and|as|at|because|but|for|from|if|in|into|of|on|or|rather|so|than|that|the|to|versus|while|with|without)\s*$/i.test(clean) ||
+    (/^[A-Za-z]/.test(clean) && !/[.!?"]$/.test(clean) && clean.length > 80)
+  )
 }
 
 function patternTextLooksPlaceholder(text: string) {
