@@ -897,7 +897,21 @@ function themeFamilyForText(text) {
     const cleaned = `${text}`.trim();
     if (!cleaned)
         return null;
-    return THEME_FAMILIES.find((family) => family.test.test(cleaned)) ?? null;
+    const directMatch = THEME_FAMILIES.find((family) => family.test.test(cleaned));
+    if (directMatch)
+        return directMatch;
+    const normalizedTokens = semanticTokenSet(cleaned);
+    if (!normalizedTokens.size)
+        return null;
+    const semanticMatches = THEME_FAMILIES
+        .map((family) => {
+        const familyAnchor = `${family.title} ${family.questions.join(' ')}`;
+        const score = semanticSimilarity(cleaned, familyAnchor);
+        return { family, score };
+    })
+        .filter((item) => item.score >= 0.34)
+        .sort((left, right) => right.score - left.score);
+    return semanticMatches[0]?.family ?? null;
 }
 function themeCandidateIsSelfConsistent(title, evidence) {
     const titleFamily = themeFamilyForText(title);
