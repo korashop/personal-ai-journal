@@ -13,6 +13,7 @@ type CreateEntryInput = {
 type UpdateEntryInput = {
     entryId: string;
     userId: string;
+    createdAt: string;
     rawText: string;
     title: string;
     tags: string[];
@@ -59,17 +60,17 @@ declare class SupabaseStore {
         entries: EntryListRecord[];
         selectedEntry: JournalView;
         patternEntries: {
-            id: any;
-            userId: any;
-            createdAt: any;
-            rawText: any;
-            source: any;
+            id: string;
+            userId: string;
+            createdAt: string;
+            rawText: string;
+            source: import("../../src/types.js").EntrySource;
             title: string;
-            tags: any;
-            photoUrls: any[];
+            tags: string[];
+            photoUrls: string[];
             summary: string;
-            hasOpenThreads: any;
-            analysis: AnalysisPayload;
+            hasOpenThreads: boolean;
+            analysis: AnalysisPayload | null;
         }[];
         memoryDoc: {
             id: any;

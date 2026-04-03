@@ -5,6 +5,7 @@ import sharp from 'sharp'
 import { config, hasAnthropicConfig } from '../config.js'
 import type {
   AnalysisPayload,
+  EntryThread,
   HighlightRecord,
   JournalEntry,
   MemoryDocumentRecord,
@@ -989,9 +990,15 @@ function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'up
 type LocalThemeCandidate = {
   title: string
   entryId: string
+  entryTitle: string
   evidence: string
+  claim: string
+  whyItMatters: string
   createdAt: string
   weight: number
+  confidence: number
+  salience: number
+  tags: string[]
   familyKey?: string
 }
 
@@ -1004,7 +1011,13 @@ type PatternClusterDraft = {
     entryId: string
     entryTitle: string
     evidence: string
+    claim: string
+    whyItMatters: string
     weight: number
+    confidence: number
+    salience: number
+    tags: string[]
+    createdAt: string
   }>
   totalWeight: number
   createdAt: string
@@ -1278,6 +1291,305 @@ function selectPatternEvidenceSnippet(pattern: PatternSection, entry: JournalEnt
   ])
 
   return cleanTruncatedEnding(familyEvidence || openEvidence || entry.summary || '')
+}
+
+function buildThreadWhyItMatters(label: string, claim: string, familyKey?: string) {
+  const familyReasons: Record<string, string> = {
+    'self-authorization': 'This matters because it can quietly delay direct asks until you feel overqualified enough to deserve them.',
+    'outward-proof': 'This matters because borrowed certainty can make another person’s attention or approval feel like the gate to your own desire.',
+    'alignment-drift': 'This matters because the cost is living farther from a state you already recognize as more honest or surrendered.',
+    'output-anchor': 'This matters because output is functioning as a reality anchor, not just productivity, so the pattern affects whether days feel real.',
+    'relationship-attunement': 'This matters because generic closeness is not enough here; you seem to be tracking whether love feels specifically attuned.',
+    'collaboration-threshold': 'This matters because staying in lone effort can cap both ambition and joy if the real unlock is finding the right collaborators.',
+    'family-mission': 'This matters because family is showing up as a life-organizing direction, not just a someday preference.',
+    'depth-craft': 'This matters because shallow motion seems to leave a residue, while real craft/depth carries a stronger sense of aliveness.',
+    'certainty-delay': 'This matters because waiting for certainty can become the mechanism that creates the very regret or stuckness you are trying to avoid.',
+    'physical-pull': 'This matters because embodied making seems to carry a different kind of energy than staying only in abstract thought.',
+    'missed-window': 'This matters because old timing stories can become self-punishing if they are not translated into present-day signal and action.',
+  }
+
+  const reason = familyKey ? familyReasons[familyKey] : ''
+  if (reason) return reason
+  const cleanedClaim = cleanTruncatedEnding(claim)
+  const cleanedLabel = simplifyPatternTitle(label)
+  return cleanedClaim
+    ? `This matters because ${cleanedClaim.charAt(0).toLowerCase()}${cleanedClaim.slice(1)}`
+    : `This matters because ${cleanedLabel.toLowerCase()} is carrying enough charge to recur or shape decisions.`
+}
+
+function clampScore(value: number, min = 0.35, max = 0.98) {
+  return Math.max(min, Math.min(max, Number(value.toFixed(2))))
+}
+
+function buildThreadClaim(label: string, snippet: string, summary: string, sectionContent = '') {
+  const anchor = firstSentence(sectionContent || snippet || summary, 180)
+  const family = themeFamilyForText(`${label} ${anchor}`)
+  const cleanedLabel = simplifyPatternTitle(label)
+
+  if (family?.key === 'self-authorization') {
+    return formatPatternSentence('The recurring move is needing legitimacy or capability to feel established before asking directly for what you want')
+  }
+  if (family?.key === 'outward-proof') {
+    return formatPatternSentence('The thread is checking outward for proof or borrowed conviction before trusting your own desire')
+  }
+  if (family?.key === 'alignment-drift') {
+    return formatPatternSentence('The thread is tracking the distance between an aligned/surrendered state and the mode daily life is actually rewarding')
+  }
+  if (family?.key === 'certainty-delay') {
+    return formatPatternSentence('The thread is postponing visible movement until more certainty appears, then feeling the cost of that delay')
+  }
+  if (family?.key === 'relationship-attunement') {
+    return formatPatternSentence('The thread is testing whether closeness feels specifically attuned and expressive enough to count as real love')
+  }
+  if (family?.key === 'collaboration-threshold') {
+    return formatPatternSentence('The thread is moving from solo effort toward the question of who would actually make the work larger or more real')
+  }
+  if (family?.key === 'family-mission') {
+    return formatPatternSentence('The thread is treating family as a life-orienting mission and asking what present-day choices should serve that')
+  }
+  if (family?.key === 'depth-craft') {
+    return formatPatternSentence('The thread is wanting deeper craft or sustained immersion instead of a broad-but-shallow mode')
+  }
+  if (family?.key === 'output-anchor') {
+    return formatPatternSentence('The thread is using concrete output as a way to make time feel real rather than consumed by circling or intake')
+  }
+  if (family?.key === 'physical-pull') {
+    return formatPatternSentence('The thread is being pulled toward tactile or physical forms of making that feel more embodied than pure abstraction')
+  }
+  if (family?.key === 'missed-window') {
+    return formatPatternSentence('The thread is replaying old timing windows and trying to extract usable signal without turning that into self-punishment')
+  }
+
+  if (anchor && semanticSimilarity(anchor, cleanedLabel) < 0.85) {
+    return formatPatternSentence(`${cleanedLabel}: ${anchor}`)
+  }
+
+  return formatPatternSentence(cleanedLabel || summary || 'A live thread in this entry')
+}
+
+function normalizeEntryThreadCandidate(
+  candidate: {
+    label: string
+    claim: string
+    snippets: string[]
+    whyItMatters: string
+    confidence: number
+    salience: number
+    tags: string[]
+  },
+  entry: Pick<JournalEntry, 'id' | 'title' | 'createdAt' | 'tags' | 'summary'>,
+): EntryThread | null {
+  const label = simplifyPatternTitle(candidate.label)
+  const claim = cleanTruncatedEnding(candidate.claim)
+  const snippets = dedupePatternLines(
+    candidate.snippets
+      .map((item) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(item))))
+      .filter((item) => item && !evidenceLooksFragmentary(item)),
+    claim,
+  ).slice(0, 3)
+  const whyItMatters = cleanTruncatedEnding(candidate.whyItMatters)
+
+  if (!label || !claim || !snippets.length) return null
+
+  return {
+    entryId: entry.id,
+    entryTitle: simplifyPatternTitle(entry.title) || 'Untitled entry',
+    label,
+    claim,
+    snippets,
+    whyItMatters: whyItMatters || buildThreadWhyItMatters(label, claim, themeFamilyForText(`${label} ${claim}`)?.key),
+    confidence: clampScore(candidate.confidence),
+    salience: clampScore(candidate.salience),
+    tags: [...new Set([...(candidate.tags ?? []), ...entry.tags].map((item) => item.trim()).filter(Boolean))].slice(0, 6),
+    createdAt: entry.createdAt,
+  }
+}
+
+function dedupeEntryThreads(threads: EntryThread[]) {
+  const kept: EntryThread[] = []
+
+  for (const thread of threads.sort((left, right) => (right.salience * right.confidence) - (left.salience * left.confidence))) {
+    const duplicate = kept.find((existing) => {
+      const sameLabel = normalizePatternTitle(existing.label) === normalizePatternTitle(thread.label)
+      const relatedLabel =
+        themeTitleSimilarity(existing.label, thread.label) >= 0.8 ||
+        semanticSimilarity(existing.label, thread.label) >= 0.82
+      const sameClaim =
+        semanticSimilarity(`${existing.claim} ${existing.snippets[0] ?? ''}`, `${thread.claim} ${thread.snippets[0] ?? ''}`) >= 0.8
+      return sameLabel || (relatedLabel && sameClaim)
+    })
+
+    if (!duplicate) {
+      kept.push(thread)
+      continue
+    }
+
+    if ((thread.snippets[0]?.length ?? 0) > (duplicate.snippets[0]?.length ?? 0)) {
+      duplicate.snippets = dedupePatternLines([...thread.snippets, ...duplicate.snippets], duplicate.claim).slice(0, 3)
+    }
+    duplicate.confidence = clampScore(Math.max(duplicate.confidence, thread.confidence))
+    duplicate.salience = clampScore(Math.max(duplicate.salience, thread.salience))
+    duplicate.tags = [...new Set([...duplicate.tags, ...thread.tags])].slice(0, 6)
+  }
+
+  return kept.slice(0, 8)
+}
+
+function threadSnippetsFromSource(entry: JournalEntry, label: string, claim: string) {
+  const sourceLines = splitIntoCandidateSentences(entry.rawText)
+    .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
+    .filter((line) => line && !evidenceLooksFragmentary(line))
+  const family = themeFamilyForText(`${label} ${claim}`)
+  const familySnippet = family ? bestFamilyEvidenceLine(sourceLines, family) : ''
+  const semanticSnippet = bestOpenThemeEvidenceLine([
+    ...sourceLines,
+    claim,
+    entry.summary,
+  ])
+
+  return dedupePatternLines([
+    familySnippet,
+    semanticSnippet,
+    firstSentence(claim, 180),
+    entry.summary,
+  ].filter(Boolean)).slice(0, 3)
+}
+
+export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
+  const sourceLines = sourceLinesForPatternEvidence(entry)
+  const storedThreads = (entry.analysis?.entryThreads ?? [])
+    .map((thread) =>
+      normalizeEntryThreadCandidate(
+        {
+          label: thread.label,
+          claim: thread.claim,
+          snippets: thread.snippets?.length ? thread.snippets : threadSnippetsFromSource(entry, thread.label, thread.claim),
+          whyItMatters: thread.whyItMatters,
+          confidence: thread.confidence,
+          salience: thread.salience,
+          tags: thread.tags,
+        },
+        entry,
+      ),
+    )
+    .filter((thread): thread is EntryThread => Boolean(thread))
+
+  if (storedThreads.length) {
+    return dedupeEntryThreads(storedThreads)
+  }
+
+  const threadCandidates = new Map<string, {
+    label: string
+    claim: string
+    snippets: string[]
+    whyItMatters: string
+    confidence: number
+    salience: number
+    tags: string[]
+  }>()
+
+  for (const family of THEME_FAMILIES) {
+    const snippet = bestFamilyEvidenceLine(sourceLines, family)
+    if (!snippet) continue
+
+    const label = family.title
+    const claim = buildThreadClaim(label, snippet, entry.summary)
+    const confidence = 0.78 + Math.min(scoreEvidenceLine(snippet, family), 5) * 0.03
+    const salience =
+      0.62 +
+      Math.min(scoreThemeCharge(`${claim} ${snippet}`), 5) * 0.05 +
+      (entry.hasOpenThreads ? 0.08 : 0)
+
+    threadCandidates.set(normalizePatternTitle(label), {
+      label,
+      claim,
+      snippets: threadSnippetsFromSource(entry, label, claim),
+      whyItMatters: buildThreadWhyItMatters(label, claim, family.key),
+      confidence,
+      salience,
+      tags: [family.title, ...entry.tags],
+    })
+  }
+
+  for (const section of entry.analysis?.sections ?? []) {
+    if (isGenericSectionTitle(section.title)) continue
+    const sectionLabel = simplifyPatternTitle(section.title)
+    const family = themeFamilyForText(`${sectionLabel} ${section.content}`)
+    const label = family?.title ?? sectionLabel
+    if (!label || (!family && uncategorizedThemeTitleLooksTooGeneric(label))) continue
+
+    const snippetSource = family
+      ? bestFamilyEvidenceLine(sourceLines, family)
+      : bestOpenThemeEvidenceLine([
+          ...splitIntoCandidateSentences(entry.rawText),
+          ...splitIntoCandidateSentences(section.content),
+          entry.summary,
+        ])
+    const snippets = threadSnippetsFromSource(entry, label, section.content || snippetSource)
+    const claim = buildThreadClaim(label, snippetSource || snippets[0] || section.content, entry.summary, section.content)
+    if (!snippets.length || !claim) continue
+
+    const key = normalizePatternTitle(label)
+    const existing = threadCandidates.get(key)
+    const candidate = {
+      label,
+      claim,
+      snippets,
+      whyItMatters: buildThreadWhyItMatters(label, claim, family?.key),
+      confidence: family ? 0.78 : 0.64,
+      salience:
+        0.56 +
+        Math.min(scoreThemeCharge(`${section.title} ${section.content}`), 5) * 0.05 +
+        (scoreTextSpecificity(section.content) > 2 ? 0.06 : 0),
+      tags: [sectionLabel, ...(family ? [family.title] : []), ...entry.tags],
+    }
+
+    if (!existing || candidate.salience * candidate.confidence > existing.salience * existing.confidence) {
+      threadCandidates.set(key, candidate)
+    }
+  }
+
+  for (const signal of entry.analysis?.patternSignals ?? []) {
+    const label = simplifyPatternTitle(signal)
+    if (!label) continue
+    const family = themeFamilyForText(label)
+    if (!family && uncategorizedThemeTitleLooksTooGeneric(label)) continue
+    const normalizedLabel = family?.title ?? label
+    const claim = buildThreadClaim(normalizedLabel, entry.summary, entry.summary)
+    const snippets = threadSnippetsFromSource(entry, normalizedLabel, claim)
+    if (!snippets.length) continue
+
+    const key = normalizePatternTitle(normalizedLabel)
+    if (!threadCandidates.has(key)) {
+      threadCandidates.set(key, {
+        label: normalizedLabel,
+        claim,
+        snippets,
+        whyItMatters: buildThreadWhyItMatters(normalizedLabel, claim, family?.key),
+        confidence: family ? 0.72 : 0.6,
+        salience: 0.54 + Math.min(scoreThemeCharge(`${claim} ${snippets[0] ?? ''}`), 5) * 0.04,
+        tags: [label, ...(family ? [family.title] : []), ...entry.tags],
+      })
+    }
+  }
+
+  if (!threadCandidates.size && entry.summary) {
+    threadCandidates.set(normalizePatternTitle(entry.title || entry.summary), {
+      label: simplifyPatternTitle(entry.title || entry.summary || 'Journal thread'),
+      claim: buildThreadClaim(entry.title || 'Journal thread', entry.summary, entry.summary),
+      snippets: threadSnippetsFromSource(entry, entry.title || 'Journal thread', entry.summary),
+      whyItMatters: `This matters because the entry’s main signal appears to be ${entry.summary.charAt(0).toLowerCase()}${entry.summary.slice(1)}`,
+      confidence: 0.52,
+      salience: 0.5,
+      tags: entry.tags,
+    })
+  }
+
+  return dedupeEntryThreads(
+    [...threadCandidates.values()]
+      .map((candidate) => normalizeEntryThreadCandidate(candidate, entry))
+      .filter((thread): thread is EntryThread => Boolean(thread)),
+  )
 }
 
 function semanticToken(token: string) {
@@ -1672,12 +1984,125 @@ function scoreThemeSignal(
   )
 }
 
+function scoreThemeFreshness(pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'> | PatternSection) {
+  const newestEvidenceAt = (pattern.supportingEvidence ?? [])
+    .map((item) => item.createdAt)
+    .filter((item): item is string => Boolean(item))
+    .sort((left, right) => right.localeCompare(left))[0]
+
+  if (!newestEvidenceAt) return 1
+
+  const ageDays = Math.max(0, (Date.now() - new Date(newestEvidenceAt).getTime()) / (1000 * 60 * 60 * 24))
+  if (ageDays <= 2) return 10
+  if (ageDays <= 7) return 8
+  if (ageDays <= 21) return 6
+  if (ageDays <= 60) return 4
+  return 2
+}
+
+function scoreThemeWeightFromEvidence(pattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'> | PatternSection) {
+  const evidence = pattern.supportingEvidence ?? []
+  if (!evidence.length) {
+    return Math.min(10, scoreThemeCharge(pattern.overview) + pattern.dimensions.reduce((sum, item) => sum + scoreThemeCharge(item), 0))
+  }
+
+  const average = evidence.reduce((sum, item) => {
+    const confidence = item.confidence ?? 0.6
+    const salience = item.salience ?? 0.6
+    return sum + confidence * salience
+  }, 0) / evidence.length
+
+  const chargeBoost = Math.min(
+    4,
+    Math.max(0, scoreThemeCharge(pattern.overview)) +
+      pattern.dimensions.reduce((sum, item) => sum + Math.max(0, scoreThemeCharge(item)), 0),
+  )
+
+  return Math.min(10, Math.round(average * 10 + chargeBoost))
+}
+
+type ThemeRankInput = {
+  title: string
+  overview: string
+  dimensions: string[]
+  questions: string[]
+  exploreOptions: string[]
+  supportingEvidence?: PatternSection['supportingEvidence']
+  entryIds: string[]
+  status?: PatternSection['status']
+  prominence?: PatternSection['prominence']
+  entryCount?: number
+  rankScore?: number
+  rankFactors?: PatternSection['rankFactors']
+  rankRationale?: string
+  themeSummary?: string[]
+}
+
+function buildThemeRankMetadata<T extends ThemeRankInput>(
+  pattern: T,
+): T & Pick<PatternSection, 'prominence' | 'rankScore' | 'rankFactors' | 'rankRationale' | 'themeSummary'> {
+  const recurrence =
+    pattern.entryIds.length >= 6 ? 10 :
+      pattern.entryIds.length >= 4 ? 8 :
+        pattern.entryIds.length >= 2 ? 6 :
+          2
+  const coherence = Math.max(
+    2,
+    scoreThemeCoherence(pattern.title, pattern.overview, pattern.dimensions) * 2,
+  )
+  const weight = scoreThemeWeightFromEvidence(pattern)
+  const freshness = scoreThemeFreshness(pattern)
+  const rankScore = Number((recurrence * 0.34 + coherence * 0.2 + weight * 0.28 + freshness * 0.18).toFixed(2))
+  const prominence: PatternSection['prominence'] =
+    rankScore >= 7.6 && pattern.entryIds.length >= 2
+      ? 'dominant'
+      : pattern.entryIds.length <= 1 || rankScore < 5.4
+        ? 'quiet'
+        : 'supporting'
+
+  const evidenceCount = pattern.supportingEvidence?.length ?? pattern.entryIds.length
+  const freshestSnippet = pattern.supportingEvidence?.[0]?.snippet
+  const rankRationale = [
+    `${pattern.entryIds.length} entr${pattern.entryIds.length === 1 ? 'y' : 'ies'} and ${evidenceCount} supporting thread snippet${evidenceCount === 1 ? '' : 's'}.`,
+    `Ranking blend: recurrence ${recurrence}/10, coherence ${coherence}/10, weight ${weight}/10, freshness ${freshness}/10.`,
+    freshestSnippet ? `Most recent strong snippet: ${formatPatternSentence(freshestSnippet)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  const themeSummary = dedupePatternLines([
+    pattern.supportingEvidence?.[0]?.claim ?? '',
+    pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
+    rankRationale,
+  ].filter(Boolean), pattern.overview).slice(0, 3)
+
+  return {
+    ...pattern,
+    prominence,
+    rankScore,
+    rankFactors: {
+      recurrence,
+      coherence,
+      weight,
+      freshness,
+    },
+    rankRationale,
+    themeSummary,
+  }
+}
+
+export function decoratePatternRanking(pattern: PatternSection): PatternSection {
+  return buildThemeRankMetadata(pattern)
+}
+
 function compareThemePriority(
   left: Omit<PatternSection, 'id' | 'updatedAt'> | PatternSection,
   right: Omit<PatternSection, 'id' | 'updatedAt'> | PatternSection,
 ) {
-  const rightScore = scoreThemeSignal(right) + scoreThemeStatus('status' in right ? right.status : undefined)
-  const leftScore = scoreThemeSignal(left) + scoreThemeStatus('status' in left ? left.status : undefined)
+  const rightScore = ('rankScore' in right && right.rankScore ? right.rankScore * 3 : scoreThemeSignal(right)) +
+    scoreThemeStatus('status' in right ? right.status : undefined)
+  const leftScore = ('rankScore' in left && left.rankScore ? left.rankScore * 3 : scoreThemeSignal(left)) +
+    scoreThemeStatus('status' in left ? left.status : undefined)
   if (rightScore !== leftScore) return rightScore - leftScore
 
   const rightCount = right.entryIds.length
@@ -1711,75 +2136,51 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
   const candidates: LocalThemeCandidate[] = []
 
   for (const entry of entries) {
-    const sourceLines = [
-      ...splitIntoCandidateSentences(entry.rawText),
-      entry.summary,
-    ]
-      .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
-      .filter(Boolean)
+    const entryThreads = buildEntryThreads(entry)
+    const familyBuckets = new Map<string, EntryThread>()
+    const uncategorized: EntryThread[] = []
 
-    const familyCandidates = THEME_FAMILIES.flatMap((family) => {
-      const evidence = bestFamilyEvidenceLine(sourceLines, family)
-      if (!evidence) return []
-      return [{
-        title: family.title,
-        evidence,
-        weight: 6,
-      }]
-    })
-
-    const sectionCandidates =
-      entry.analysis?.sections
-        ?.filter((section) => !isGenericSectionTitle(section.title))
-        .flatMap((section) => {
-          const title = simplifyPatternTitle(section.title)
-          const titleFamily = themeFamilyForText(title)
-          if (!titleFamily && uncategorizedThemeTitleLooksTooGeneric(title)) return []
-          const sectionLines = splitIntoCandidateSentences(section.content)
-          const evidence = titleFamily
-            ? bestFamilyEvidenceLine(sectionLines, titleFamily)
-            : bestOpenThemeEvidenceLine([section.content, ...sectionLines])
-          if (!title || !evidence || evidenceLooksFragmentary(evidence)) return []
-          return [{ title, evidence, weight: titleFamily ? 3 : 4 }]
-        }) ?? []
-
-    const combined = [...familyCandidates, ...sectionCandidates]
-      .filter((candidate) => candidate.title && candidate.evidence)
-      .filter((candidate) => themeCandidateIsSelfConsistent(candidate.title, candidate.evidence))
-      .sort((left, right) => right.weight - left.weight)
-      .slice(0, 8)
-
-    const familyBuckets = new Map<string, (typeof combined)[number]>()
-    const uncategorized: Array<(typeof combined)[number]> = []
-
-    for (const candidate of combined) {
-      const family = themeFamilyForText(candidate.evidence)
+    for (const thread of entryThreads) {
+      const family = themeFamilyForText(`${thread.label} ${thread.claim} ${thread.snippets.join(' ')}`)
       if (!family) {
-        uncategorized.push(candidate)
+        uncategorized.push(thread)
         continue
       }
 
       const existing = familyBuckets.get(family.key)
-      if (!existing || candidate.weight > existing.weight) {
-        familyBuckets.set(family.key, { ...candidate, title: family.title })
+      if (!existing || thread.salience * thread.confidence > existing.salience * existing.confidence) {
+        familyBuckets.set(family.key, {
+          ...thread,
+          label: family.title,
+        })
       }
     }
 
-    const distinctUncategorized = uncategorized.filter((candidate, index) =>
+    const distinctUncategorized = uncategorized.filter((thread, index) =>
       uncategorized.findIndex((other) =>
-        normalizePatternTitle(other.title) === normalizePatternTitle(candidate.title) ||
-        semanticSimilarity(`${other.title} ${other.evidence}`, `${candidate.title} ${candidate.evidence}`) >= 0.72,
+        normalizePatternTitle(other.label) === normalizePatternTitle(thread.label) ||
+        semanticSimilarity(`${other.label} ${other.claim}`, `${thread.label} ${thread.claim}`) >= 0.72,
       ) === index,
     )
 
-    for (const candidate of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 4)]) {
-      const family = themeFamilyForText(candidate.evidence)
+    for (const thread of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 5)]) {
+      const evidence = thread.snippets[0] ?? thread.claim
+      if (!thread.label || !evidence || evidenceLooksFragmentary(evidence)) continue
+      if (!themeCandidateIsSelfConsistent(thread.label, evidence)) continue
+
+      const family = themeFamilyForText(`${thread.label} ${thread.claim} ${evidence}`)
       candidates.push({
-        title: candidate.title,
-        entryId: entry.id,
-        evidence: candidate.evidence,
-        createdAt: entry.createdAt,
-        weight: candidate.weight,
+        title: family?.title ?? thread.label,
+        entryId: thread.entryId,
+        entryTitle: thread.entryTitle,
+        evidence,
+        claim: thread.claim,
+        whyItMatters: thread.whyItMatters,
+        createdAt: thread.createdAt,
+        confidence: thread.confidence,
+        salience: thread.salience,
+        tags: thread.tags,
+        weight: Math.max(2, Math.round(thread.confidence * thread.salience * 10)),
         familyKey: family?.key,
       })
     }
@@ -1790,13 +2191,22 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
 
 function buildPatternClusters(entries: JournalEntry[]) {
   const localCandidates = buildLocalThemeCandidates(entries)
-  const entryTitleById = new Map(entries.map((entry) => [entry.id, entry.title]))
   const clusters: Array<{
     title: string
     titleWeights: Map<string, number>
     familyKey?: string
     entryIds: Set<string>
-    evidenceByEntry: Map<string, Array<{ evidence: string; weight: number }>>
+    evidenceByEntry: Map<string, Array<{
+      entryTitle: string
+      evidence: string
+      claim: string
+      whyItMatters: string
+      weight: number
+      confidence: number
+      salience: number
+      tags: string[]
+      createdAt: string
+    }>>
     createdAt: string
     totalWeight: number
   }> = []
@@ -1820,7 +2230,17 @@ function buildPatternClusters(entries: JournalEntry[]) {
         titleWeights: new Map([[candidate.title, candidate.weight]]),
         familyKey: candidate.familyKey,
         entryIds: new Set([candidate.entryId]),
-        evidenceByEntry: new Map([[candidate.entryId, [{ evidence: candidate.evidence, weight: candidate.weight }]]]),
+        evidenceByEntry: new Map([[candidate.entryId, [{
+          entryTitle: candidate.entryTitle,
+          evidence: candidate.evidence,
+          claim: candidate.claim,
+          whyItMatters: candidate.whyItMatters,
+          weight: candidate.weight,
+          confidence: candidate.confidence,
+          salience: candidate.salience,
+          tags: candidate.tags,
+          createdAt: candidate.createdAt,
+        }]]]),
         createdAt: candidate.createdAt,
         totalWeight: candidate.weight,
       })
@@ -1835,7 +2255,17 @@ function buildPatternClusters(entries: JournalEntry[]) {
 
     const entryEvidence = existing.evidenceByEntry.get(candidate.entryId) ?? []
     if (!entryEvidence.some((item) => normalizePatternTitle(item.evidence) === normalizePatternTitle(candidate.evidence))) {
-      entryEvidence.push({ evidence: candidate.evidence, weight: candidate.weight })
+      entryEvidence.push({
+        entryTitle: candidate.entryTitle,
+        evidence: candidate.evidence,
+        claim: candidate.claim,
+        whyItMatters: candidate.whyItMatters,
+        weight: candidate.weight,
+        confidence: candidate.confidence,
+        salience: candidate.salience,
+        tags: candidate.tags,
+        createdAt: candidate.createdAt,
+      })
       existing.evidenceByEntry.set(candidate.entryId, entryEvidence)
     }
 
@@ -1855,29 +2285,36 @@ function buildPatternClusters(entries: JournalEntry[]) {
 
   const recurringClusters = scoredClusters.filter((cluster) => cluster.entryIds.size >= 2)
   const singletonClusters = scoredClusters.filter((cluster) => cluster.entryIds.size === 1)
+  const singletonBudget = Math.min(10, Math.max(4, Math.ceil(recurringClusters.length * 0.6)))
   const selectedClusters = [
-    ...recurringClusters.slice(0, 12),
-    ...singletonClusters.slice(0, recurringClusters.length >= 8 ? 2 : 4),
-  ].slice(0, 16)
+    ...recurringClusters.slice(0, 20),
+    ...singletonClusters.slice(0, singletonBudget),
+  ].slice(0, 24)
 
   return selectedClusters.map((cluster, index): PatternClusterDraft => {
     const evidenceByEntry = [...cluster.evidenceByEntry.entries()]
       .flatMap(([entryId, evidenceItems]) =>
         evidenceItems
-          .sort((left, right) => right.weight - left.weight)
+          .sort((left, right) => (right.weight + right.salience + right.confidence) - (left.weight + left.salience + left.confidence))
           .slice(0, 2)
           .flatMap((item) => {
             const evidence = cleanTruncatedEnding(item.evidence)
             if (evidenceLooksFragmentary(evidence)) return []
             return [{
               entryId,
-              entryTitle: entryTitleById.get(entryId) ?? 'Untitled entry',
+              entryTitle: item.entryTitle || 'Untitled entry',
               evidence,
+              claim: cleanTruncatedEnding(item.claim),
+              whyItMatters: cleanTruncatedEnding(item.whyItMatters),
               weight: item.weight,
+              confidence: item.confidence,
+              salience: item.salience,
+              tags: item.tags,
+              createdAt: item.createdAt,
             }]
           }),
       )
-      .sort((left, right) => right.weight - left.weight)
+      .sort((left, right) => (right.weight + right.salience + right.confidence) - (left.weight + left.salience + left.confidence))
 
     return {
       clusterId: `cluster-${index + 1}`,
@@ -1900,7 +2337,7 @@ function evidenceBelongsToCluster(cluster: PatternClusterDraft, evidence: string
 function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
   const evidence = buildClusterDimensionLines(cluster)
 
-  return {
+  return buildThemeRankMetadata({
     title: cluster.title,
     overview: buildOverviewFromCluster(cluster.title, cluster.entryIds.length, cluster.familyKey, evidence),
     dimensions: evidence,
@@ -1916,11 +2353,18 @@ function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
         entryId: item.entryId,
         entryTitle: item.entryTitle,
         snippet: cleanTruncatedEnding(item.evidence),
+        threadLabel: cluster.title,
+        claim: cleanTruncatedEnding(item.claim),
+        whyItMatters: cleanTruncatedEnding(item.whyItMatters),
+        confidence: item.confidence,
+        salience: item.salience,
+        tags: item.tags,
+        createdAt: item.createdAt,
       }))
       .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet))
       .slice(0, 8),
     entryIds: cluster.entryIds,
-  }
+  })
 }
 
 function buildQuestionsForTheme(title: string) {
@@ -1961,7 +2405,7 @@ function buildDeterministicPatterns(entries: JournalEntry[], previousPatterns: P
 
   return reconcilePatterns(previousPatterns, dedupeAndRefinePatterns(deterministic))
     .sort(compareThemePriority)
-    .slice(0, 16)
+    .slice(0, 24)
 }
 
 function patternsLookWeak(patterns: PatternSection[], entriesCount: number) {
@@ -2024,10 +2468,15 @@ function stripPatternIdentity(
   return {
     title: pattern.title,
     overview: pattern.overview,
+    prominence: pattern.prominence,
     dimensions: pattern.dimensions,
     questions: pattern.questions,
     exploreOptions: pattern.exploreOptions,
     supportingEvidence: pattern.supportingEvidence,
+    rankScore: pattern.rankScore,
+    rankFactors: pattern.rankFactors,
+    rankRationale: pattern.rankRationale,
+    themeSummary: pattern.themeSummary,
     entryIds: pattern.entryIds,
   }
 }
@@ -2082,7 +2531,7 @@ function mergeEnrichedWithFallbackPatterns(
     }
   }
 
-  return dedupeAndRefinePatterns(merged).sort(compareThemePriority)
+  return dedupeAndRefinePatterns(merged).map((pattern) => buildThemeRankMetadata(pattern)).sort(compareThemePriority)
 }
 
 type EnrichedClusterResponse = {
@@ -2200,7 +2649,7 @@ ${clusters
     const enriched = matchEnrichedCluster(cluster, parsed, index)
     if (!enriched?.title || !enriched.overview) return []
 
-    const pattern = {
+    const pattern = buildThemeRankMetadata({
       title: simplifyPatternTitle(enriched.title),
       overview: cleanTruncatedEnding(enriched.overview),
       dimensions: dedupePatternLines(
@@ -2220,11 +2669,18 @@ ${clusters
           entryId: item.entryId,
           entryTitle: item.entryTitle,
           snippet: cleanTruncatedEnding(item.evidence),
+          threadLabel: cluster.title,
+          claim: cleanTruncatedEnding(item.claim),
+          whyItMatters: cleanTruncatedEnding(item.whyItMatters),
+          confidence: item.confidence,
+          salience: item.salience,
+          tags: item.tags,
+          createdAt: item.createdAt,
         }))
         .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet))
         .slice(0, 8),
       entryIds: cluster.entryIds,
-    }
+    })
 
     return enrichedPatternLooksWeak(pattern) || !patternHasEnoughThemeEvidence(pattern) ? [] : [pattern]
   })
@@ -2262,13 +2718,13 @@ function reconcilePatterns(
             ? 'active'
             : 'emerging'
 
-    return {
+    return buildThemeRankMetadata({
       ...pattern,
       id: matched?.id ?? `pattern-${slugify(pattern.title) || Math.random().toString(36).slice(2, 8)}`,
       status,
       entryCount: pattern.entryIds.length,
       updatedAt: timestamp,
-    }
+    })
   })
 }
 
@@ -2277,7 +2733,7 @@ export async function buildPatterns(
   entries: JournalEntry[],
   previousPatterns: PatternSection[] = [],
 ): Promise<PatternSection[]> {
-  const recentEntries = entries.slice(0, 18)
+  const recentEntries = entries.slice(0, 36)
   const clusters = buildPatternClusters(recentEntries)
   const deterministicPatterns = buildDeterministicPatterns(recentEntries, previousPatterns)
   if (!anthropic || !clusters.length) {
@@ -2295,7 +2751,7 @@ export async function buildPatterns(
     const mergedPatterns = mergeEnrichedWithFallbackPatterns(enriched.patterns, deterministicPatterns)
     const reconciled = reconcilePatterns(previousPatterns, mergedPatterns)
     if (!patternsLookWeak(reconciled, recentEntries.length)) {
-      return reconciled.sort(compareThemePriority).slice(0, 16)
+      return reconciled.sort(compareThemePriority).slice(0, 24)
     }
   }
 
@@ -2303,7 +2759,7 @@ export async function buildPatterns(
 }
 
 export function buildPatternDebugReport(entries: JournalEntry[]) {
-  return buildPatternClusters(entries.slice(0, 18)).map((cluster) => ({
+  return buildPatternClusters(entries.slice(0, 36)).map((cluster) => ({
     clusterId: cluster.clusterId,
     title: cluster.title,
     familyKey: cluster.familyKey ?? null,
@@ -2325,14 +2781,21 @@ export function attachPatternSupportingEvidence(
         entryId: item.entryId,
         entryTitle: simplifyPatternTitle(item.entryTitle),
         snippet: cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(item.snippet))),
+        threadLabel: item.threadLabel ? simplifyPatternTitle(item.threadLabel) : pattern.title,
+        claim: item.claim ? cleanTruncatedEnding(item.claim) : pattern.dimensions[0] ?? pattern.overview,
+        whyItMatters: item.whyItMatters ? cleanTruncatedEnding(item.whyItMatters) : pattern.overview,
+        confidence: item.confidence,
+        salience: item.salience,
+        tags: item.tags ?? [],
+        createdAt: item.createdAt,
       }))
       .filter((item) => item.entryId && item.snippet && !evidenceLooksFragmentary(item.snippet))
 
     if (cleanedExisting.length >= Math.min(pattern.entryIds.length, 2)) {
-      return {
+      return buildThemeRankMetadata({
         ...pattern,
         supportingEvidence: cleanedExisting.slice(0, 8),
-      }
+      })
     }
 
     const derivedEvidence = pattern.entryIds.flatMap((entryId) => {
@@ -2344,6 +2807,13 @@ export function attachPatternSupportingEvidence(
         entryId: entry.id,
         entryTitle: entry.title,
         snippet,
+        threadLabel: pattern.title,
+        claim: pattern.dimensions[0] ?? pattern.overview,
+        whyItMatters: pattern.overview,
+        confidence: 0.58,
+        salience: 0.58,
+        tags: entry.tags,
+        createdAt: entry.createdAt,
       }]
     })
 
@@ -2352,13 +2822,13 @@ export function attachPatternSupportingEvidence(
       pattern.overview,
     )
 
-    return {
+    return buildThemeRankMetadata({
       ...pattern,
       supportingEvidence: dedupedSnippets
         .map((snippet) => derivedEvidence.find((item) => item.snippet === snippet))
         .filter((item): item is NonNullable<typeof item> => Boolean(item))
         .slice(0, 8),
-    }
+    })
   })
 }
 
@@ -2429,6 +2899,12 @@ ${pattern.title}
 Overview:
 ${pattern.overview}
 
+Why this theme is ranked here:
+${pattern.rankRationale ?? 'No rank rationale yet.'}
+
+Thread summary:
+${(pattern.themeSummary ?? []).map((item) => `- ${item}`).join('\n') || 'None yet'}
+
 Dimensions:
 ${pattern.dimensions.map((item) => `- ${item}`).join('\n')}
 
@@ -2444,6 +2920,12 @@ ${recentEntriesForPrompt(
   5,
   220,
 )}
+
+Supporting thread evidence:
+${(pattern.supportingEvidence ?? [])
+    .slice(0, 8)
+    .map((item) => `- ${clipForPrompt(item.entryTitle, 60)} | ${clipForPrompt(item.claim ?? item.threadLabel ?? pattern.title, 120)} | ${clipForPrompt(item.snippet, 180)} | ${clipForPrompt(item.whyItMatters ?? '', 120)}`)
+    .join('\n') || 'None'}
 
 User message:
 ${clipForPrompt(userMessage, 600)}`

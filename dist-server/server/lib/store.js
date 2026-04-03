@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { config, hasSupabaseConfig } from '../config.js';
-import { deriveDisplaySummary, deriveDisplayTitle, simplifyPatternTitle } from './ai.js';
+import { buildEntryThreads, decoratePatternRanking, deriveDisplaySummary, deriveDisplayTitle, simplifyPatternTitle, } from './ai.js';
 import { demoConversations, demoEntries, demoHighlights, demoMemoryDoc } from './demo-data.js';
 function normalizeText(text) {
     return text.replace(/\s+/g, ' ').trim();
@@ -63,6 +63,20 @@ function parseLegacyAnalysis(value, rawText) {
                     .map((section) => section.title)
                     .filter((title) => !isGenericSectionTitle(title))
                     .slice(0, 4),
+            entryThreads: (candidate.entryThreads ?? [])
+                .filter((thread) => thread?.label && thread?.claim && thread?.snippets?.length)
+                .map((thread) => ({
+                entryId: thread.entryId ?? '',
+                entryTitle: thread.entryTitle ?? '',
+                label: thread.label,
+                claim: thread.claim,
+                snippets: thread.snippets,
+                whyItMatters: thread.whyItMatters ?? thread.claim,
+                confidence: typeof thread.confidence === 'number' ? thread.confidence : 0.6,
+                salience: typeof thread.salience === 'number' ? thread.salience : 0.6,
+                tags: thread.tags ?? [],
+                createdAt: thread.createdAt ?? new Date().toISOString(),
+            })),
         };
     }
     const legacySections = [
@@ -92,6 +106,18 @@ function parseLegacyAnalysis(value, rawText) {
         ],
         feedLabels: legacySections.map((section) => section.title).slice(0, 3),
         patternSignals: [],
+        entryThreads: [],
+    };
+}
+function attachEntryThreadsToEntry(entry) {
+    if (!entry.analysis)
+        return entry;
+    return {
+        ...entry,
+        analysis: {
+            ...entry.analysis,
+            entryThreads: buildEntryThreads(entry),
+        },
     };
 }
 class DemoStore {
@@ -117,6 +143,7 @@ class DemoStore {
     async getBootstrap(userId, selectedEntryId) {
         const entries = this.entries
             .filter((entry) => entry.userId === userId)
+            .map((entry) => attachEntryThreadsToEntry(entry))
             .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
         return {
             entries: entries.map((entry) => this.mapEntryList(entry)),
@@ -128,7 +155,7 @@ class DemoStore {
         };
     }
     async createEntry(input) {
-        const entry = {
+        const entry = attachEntryThreadsToEntry({
             id: randomUUID(),
             createdAt: new Date().toISOString(),
             rawText: input.rawText,
@@ -140,7 +167,7 @@ class DemoStore {
             userId: input.userId,
             hasOpenThreads: true,
             analysis: input.analysis,
-        };
+        });
         this.entries.unshift(entry);
         this.conversations.unshift({
             id: randomUUID(),
@@ -153,14 +180,14 @@ class DemoStore {
     }
     async updateEntry(input) {
         this.entries = this.entries.map((entry) => entry.id === input.entryId
-            ? {
+            ? attachEntryThreadsToEntry({
                 ...entry,
                 rawText: input.rawText,
                 title: input.title,
                 tags: input.tags,
                 summary: input.summary,
                 analysis: input.analysis,
-            }
+            })
             : entry);
         const firstAssistantIndex = this.conversations.findIndex((message) => message.entryId === input.entryId && message.role === 'assistant');
         if (firstAssistantIndex >= 0) {
@@ -205,7 +232,7 @@ class DemoStore {
     }
     async updatePatterns(userId, patterns) {
         void userId;
-        this.patterns = patterns;
+        this.patterns = patterns.map((pattern) => decoratePatternRanking(pattern));
         return this.patterns;
     }
     async getEntryView(entryId, userId) {
@@ -215,7 +242,7 @@ class DemoStore {
             throw new Error('Entry not found');
         }
         return {
-            ...entry,
+            ...attachEntryThreadsToEntry(entry),
             conversation: this.conversations
                 .filter((message) => message.entryId === entryId)
                 .sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
@@ -269,7 +296,7 @@ class SupabaseStore {
     async mapEntry(entry, conversations) {
         const analysis = parseLegacyAnalysis(entry.ai_response, entry.raw_text);
         const derivedSummary = deriveDisplaySummary(analysis?.summary?.trim() || entry.summary, entry.raw_text);
-        return {
+        const mappedEntry = attachEntryThreadsToEntry({
             id: entry.id,
             userId: entry.user_id,
             createdAt: entry.created_at,
@@ -281,6 +308,9 @@ class SupabaseStore {
             summary: derivedSummary,
             hasOpenThreads: entry.has_open_threads ?? false,
             analysis,
+        });
+        return {
+            ...mappedEntry,
             conversation: conversations.filter((message) => message.entry_id === entry.id).map((message) => this.mapConversation(message)),
         };
     }
@@ -324,17 +354,19 @@ class SupabaseStore {
             entries: entriesResponse.data.map((entry) => this.mapEntryList(entry, conversationCounts[entry.id] ?? 0)),
             selectedEntry: selectedId ? await this.getEntryView(selectedId, userId) : null,
             patternEntries: entriesResponse.data.map((entry) => ({
-                id: entry.id,
-                userId: entry.user_id,
-                createdAt: entry.created_at,
-                rawText: entry.raw_text,
-                source: entry.source,
-                title: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).title,
-                tags: entry.tags ?? [],
-                photoUrls: [],
-                summary: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).summary,
-                hasOpenThreads: entry.has_open_threads ?? false,
-                analysis: parseLegacyAnalysis(entry.ai_response, entry.raw_text),
+                ...attachEntryThreadsToEntry({
+                    id: entry.id,
+                    userId: entry.user_id,
+                    createdAt: entry.created_at,
+                    rawText: entry.raw_text,
+                    source: entry.source,
+                    title: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).title,
+                    tags: entry.tags ?? [],
+                    photoUrls: [],
+                    summary: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).summary,
+                    hasOpenThreads: entry.has_open_threads ?? false,
+                    analysis: parseLegacyAnalysis(entry.ai_response, entry.raw_text),
+                }),
             })),
             memoryDoc: memoryResponse.data
                 ? {
@@ -359,6 +391,19 @@ class SupabaseStore {
     async createEntry(input) {
         const id = randomUUID();
         const createdAt = new Date().toISOString();
+        const preparedEntry = attachEntryThreadsToEntry({
+            id,
+            userId: input.userId,
+            createdAt,
+            rawText: input.rawText,
+            source: input.source,
+            title: input.title,
+            tags: input.tags,
+            photoUrls: input.photoUrls,
+            summary: input.summary,
+            hasOpenThreads: true,
+            analysis: input.analysis,
+        });
         const insertResponse = await this.client.from('entries').insert({
             id,
             user_id: input.userId,
@@ -369,7 +414,7 @@ class SupabaseStore {
             photo_url: input.photoUrls.length ? JSON.stringify(input.photoUrls) : null,
             summary: input.summary,
             has_open_threads: true,
-            ai_response: input.analysis,
+            ai_response: preparedEntry.analysis,
         });
         if (insertResponse.error)
             throw insertResponse.error;
@@ -386,13 +431,26 @@ class SupabaseStore {
         return this.getEntryView(id, input.userId);
     }
     async updateEntry(input) {
+        const preparedEntry = attachEntryThreadsToEntry({
+            id: input.entryId,
+            userId: input.userId,
+            createdAt: input.createdAt,
+            rawText: input.rawText,
+            source: 'typed',
+            title: input.title,
+            tags: input.tags,
+            photoUrls: [],
+            summary: input.summary,
+            hasOpenThreads: true,
+            analysis: input.analysis,
+        });
         const updateResponse = await this.client
             .from('entries')
             .update({
             raw_text: input.rawText,
             tags: input.tags,
             summary: input.summary,
-            ai_response: input.analysis,
+            ai_response: preparedEntry.analysis,
         })
             .eq('id', input.entryId)
             .eq('user_id', input.userId);
@@ -531,7 +589,7 @@ class SupabaseStore {
             .order('updated_at', { ascending: false });
         if (response.error)
             throw response.error;
-        return response.data.map((pattern) => ({
+        return response.data.map((pattern) => decoratePatternRanking({
             id: pattern.id,
             title: simplifyPatternTitle(pattern.title),
             overview: pattern.overview,

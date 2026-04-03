@@ -1,4 +1,4 @@
-import type { AnalysisPayload, HighlightRecord, JournalEntry, MemoryDocumentRecord, PatternSection, ResurfacingCard } from '../types.js';
+import type { AnalysisPayload, EntryThread, HighlightRecord, JournalEntry, MemoryDocumentRecord, PatternSection, ResurfacingCard } from '../types.js';
 type Context = {
     memoryDoc: MemoryDocumentRecord | null;
     recentEntries: JournalEntry[];
@@ -25,6 +25,8 @@ export declare function generateAnalysis(rawText: string, tags: string[], contex
 export declare function rewriteMemoryDoc(currentMemory: MemoryDocumentRecord | null, recentEntries: JournalEntry[]): Promise<string>;
 export declare function simplifyPatternTitle(title: string): string;
 export declare function chooseResurfacingCard(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], highlights: HighlightRecord[]): ResurfacingCard | null;
+export declare function buildEntryThreads(entry: JournalEntry): EntryThread[];
+export declare function decoratePatternRanking(pattern: PatternSection): PatternSection;
 export declare function buildPatterns(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], previousPatterns?: PatternSection[]): Promise<PatternSection[]>;
 export declare function buildPatternDebugReport(entries: JournalEntry[]): {
     clusterId: string;
@@ -35,7 +37,13 @@ export declare function buildPatternDebugReport(entries: JournalEntry[]): {
         entryId: string;
         entryTitle: string;
         evidence: string;
+        claim: string;
+        whyItMatters: string;
         weight: number;
+        confidence: number;
+        salience: number;
+        tags: string[];
+        createdAt: string;
     }[];
     fallbackPattern: {
         title: string;
@@ -47,9 +55,16 @@ export declare function buildPatternDebugReport(entries: JournalEntry[]): {
             entryId: string;
             entryTitle: string;
             snippet: string;
+            threadLabel: string;
+            claim: string;
+            whyItMatters: string;
+            confidence: number;
+            salience: number;
+            tags: string[];
+            createdAt: string;
         }[];
         entryIds: string[];
-    };
+    } & Pick<PatternSection, "prominence" | "rankScore" | "rankFactors" | "rankRationale" | "themeSummary">;
 }[];
 export declare function attachPatternSupportingEvidence(patterns: PatternSection[], entries: JournalEntry[]): PatternSection[];
 export declare function generateReply(entry: JournalEntry, userReply: string, context: Context): Promise<string>;

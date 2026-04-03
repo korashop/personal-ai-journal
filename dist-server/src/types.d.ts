@@ -12,6 +12,18 @@ export type AnalysisSection = {
     title: string;
     content: string;
 };
+export type EntryThread = {
+    entryId: string;
+    entryTitle: string;
+    label: string;
+    claim: string;
+    snippets: string[];
+    whyItMatters: string;
+    confidence: number;
+    salience: number;
+    tags: string[];
+    createdAt: string;
+};
 export type AnalysisPayload = {
     title: string;
     summary: string;
@@ -21,6 +33,7 @@ export type AnalysisPayload = {
     exploreOptions: string[];
     feedLabels: string[];
     patternSignals?: string[];
+    entryThreads?: EntryThread[];
 };
 export type EntryRecord = {
     id: string;
@@ -67,7 +80,23 @@ export type PatternSection = {
         entryId: string;
         entryTitle: string;
         snippet: string;
+        threadLabel?: string;
+        claim?: string;
+        whyItMatters?: string;
+        confidence?: number;
+        salience?: number;
+        tags?: string[];
+        createdAt?: string;
     }>;
+    rankScore?: number;
+    rankFactors?: {
+        recurrence: number;
+        coherence: number;
+        weight: number;
+        freshness: number;
+    };
+    rankRationale?: string;
+    themeSummary?: string[];
     entryIds: string[];
     entryCount: number;
     updatedAt: string;

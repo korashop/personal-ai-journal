@@ -1159,6 +1159,11 @@ button {
     rgba(255, 255, 255, 0.04);
 }
 
+.pattern-home-card.quiet {
+  border-color: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .pattern-home-card strong {
   font-size: 1.08rem;
   line-height: 1.25;
@@ -1217,6 +1222,19 @@ button {
 .pattern-status.deepening {
   color: #bfe8ef;
   background: rgba(107, 172, 187, 0.12);
+}
+
+.pattern-score-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .pattern-focus-actions {
@@ -1299,6 +1317,78 @@ button {
 
 .memory-doc {
   min-height: 220px;
+}
+
+.pattern-rank-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 18px;
+}
+
+.pattern-rank-card {
+  border-radius: 18px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pattern-rank-card span,
+.pattern-evidence-meta span,
+.related-thread-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pattern-rank-card strong {
+  font-size: 1rem;
+}
+
+.pattern-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.pattern-evidence-item {
+  border-radius: 20px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.pattern-evidence-head,
+.pattern-evidence-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pattern-evidence-item p,
+.pattern-evidence-item blockquote,
+.pattern-evidence-item small {
+  margin: 10px 0 0;
+  line-height: 1.65;
+}
+
+.pattern-evidence-item blockquote {
+  border-left: 2px solid rgba(142, 184, 199, 0.25);
+  padding-left: 12px;
+  color: var(--text);
+}
+
+.pattern-evidence-item small {
+  display: block;
+  color: var(--muted);
 }
 
 .inline-memory-panel {
@@ -1443,6 +1533,10 @@ button {
 
   .pattern-home-summary {
     grid-template-columns: 1fr;
+  }
+
+  .pattern-rank-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pattern-focus-actions {

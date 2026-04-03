@@ -87,9 +87,33 @@ const patternReplySchema = z.object({
     title: z.string(),
     overview: z.string(),
     status: z.enum(['emerging', 'active', 'deepening']).optional(),
+    prominence: z.enum(['dominant', 'supporting', 'quiet']).optional(),
     dimensions: z.array(z.string()),
     questions: z.array(z.string()),
     exploreOptions: z.array(z.string()),
+    supportingEvidence: z
+      .array(z.object({
+        entryId: z.string(),
+        entryTitle: z.string(),
+        snippet: z.string(),
+        threadLabel: z.string().optional(),
+        claim: z.string().optional(),
+        whyItMatters: z.string().optional(),
+        confidence: z.number().optional(),
+        salience: z.number().optional(),
+        tags: z.array(z.string()).optional(),
+        createdAt: z.string().optional(),
+      }))
+      .optional(),
+    rankScore: z.number().optional(),
+    rankFactors: z.object({
+      recurrence: z.number(),
+      coherence: z.number(),
+      weight: z.number(),
+      freshness: z.number(),
+    }).optional(),
+    rankRationale: z.string().optional(),
+    themeSummary: z.array(z.string()).optional(),
     entryIds: z.array(z.string()),
     entryCount: z.number().optional(),
     updatedAt: z.string().optional(),
@@ -127,12 +151,26 @@ function triggerDerivedRefresh(userId: string) {
 
 function shouldRefreshPatterns(
   entriesCount: number,
-  patterns: Array<{ overview: string; dimensions: string[]; questions: string[]; status?: string; entryCount?: number; title?: string }>,
+  patterns: Array<{
+    overview: string
+    dimensions: string[]
+    questions: string[]
+    status?: string
+    prominence?: string
+    entryCount?: number
+    title?: string
+    rankScore?: number
+  }>,
 ) {
   if (!patterns.length) return true
   if (entriesCount >= 10 && patterns.length <= 5) return true
-  const singletonCount = patterns.filter((pattern) => (pattern.entryCount ?? 0) <= 1).length
-  if (patterns.length >= 5 && singletonCount / patterns.length >= 0.6) return true
+  if (patterns.some((pattern) => pattern.rankScore == null)) return true
+  const promotedSingletonCount = patterns.filter(
+    (pattern) =>
+      (pattern.entryCount ?? 0) <= 1 &&
+      pattern.prominence !== 'quiet',
+  ).length
+  if (patterns.length >= 5 && promotedSingletonCount / patterns.length >= 0.4) return true
   if (patterns.length >= 4 && patterns.every((pattern) => pattern.status === 'emerging')) return true
   const genericQuestionCount = patterns.filter((pattern) =>
     pattern.questions.every((question) =>
@@ -407,6 +445,7 @@ app.patch('/api/entries/:entryId', async (request, response, next) => {
     const updatedEntry = await store.updateEntry({
       entryId: entry.id,
       userId,
+      createdAt: entry.createdAt,
       rawText: parsed.rawText,
       title: analysis.title || buildEntryTitle(analysisInput, tags),
       tags,
@@ -446,6 +485,7 @@ app.post('/api/entries/:entryId/reanalyze', async (request, response, next) => {
     const updatedEntry = await store.updateEntry({
       entryId: entry.id,
       userId,
+      createdAt: entry.createdAt,
       rawText: entry.rawText,
       title: analysis.title || buildEntryTitle(analysisInput, tags),
       tags,

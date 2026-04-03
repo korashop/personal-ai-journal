@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 import { config, hasSupabaseConfig } from '../config.js'
-import { deriveDisplaySummary, deriveDisplayTitle, simplifyPatternTitle } from './ai.js'
+import {
+  buildEntryThreads,
+  decoratePatternRanking,
+  deriveDisplaySummary,
+  deriveDisplayTitle,
+  simplifyPatternTitle,
+} from './ai.js'
 import { demoConversations, demoEntries, demoHighlights, demoMemoryDoc } from './demo-data.js'
 import type {
   AnalysisPayload,
@@ -51,6 +57,7 @@ type CreateEntryInput = {
 type UpdateEntryInput = {
   entryId: string
   userId: string
+  createdAt: string
   rawText: string
   title: string
   tags: string[]
@@ -105,6 +112,18 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
     exploreOptions?: string[]
     feedLabels?: string[]
     patternSignals?: string[]
+    entryThreads?: Array<{
+      entryId?: string
+      entryTitle?: string
+      label?: string
+      claim?: string
+      snippets?: string[]
+      whyItMatters?: string
+      confidence?: number
+      salience?: number
+      tags?: string[]
+      createdAt?: string
+    }>
     restate?: string
     underneath?: string
     challenge?: string
@@ -140,6 +159,20 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
             .map((section) => section.title)
             .filter((title) => !isGenericSectionTitle(title))
             .slice(0, 4),
+      entryThreads: (candidate.entryThreads ?? [])
+        .filter((thread) => thread?.label && thread?.claim && thread?.snippets?.length)
+        .map((thread) => ({
+          entryId: thread.entryId ?? '',
+          entryTitle: thread.entryTitle ?? '',
+          label: thread.label!,
+          claim: thread.claim!,
+          snippets: thread.snippets!,
+          whyItMatters: thread.whyItMatters ?? thread.claim!,
+          confidence: typeof thread.confidence === 'number' ? thread.confidence : 0.6,
+          salience: typeof thread.salience === 'number' ? thread.salience : 0.6,
+          tags: thread.tags ?? [],
+          createdAt: thread.createdAt ?? new Date().toISOString(),
+        })),
     }
   }
 
@@ -175,6 +208,18 @@ function parseLegacyAnalysis(value: unknown, rawText: string): AnalysisPayload |
     ],
     feedLabels: legacySections.map((section) => section.title).slice(0, 3),
     patternSignals: [],
+    entryThreads: [],
+  }
+}
+
+function attachEntryThreadsToEntry(entry: JournalEntry): JournalEntry {
+  if (!entry.analysis) return entry
+  return {
+    ...entry,
+    analysis: {
+      ...entry.analysis,
+      entryThreads: buildEntryThreads(entry),
+    },
   }
 }
 
@@ -206,6 +251,7 @@ class DemoStore {
   async getBootstrap(userId: string, selectedEntryId?: string | null): Promise<JournalBootstrapRecord> {
     const entries = this.entries
       .filter((entry) => entry.userId === userId)
+      .map((entry) => attachEntryThreadsToEntry(entry))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
 
     return {
@@ -219,7 +265,7 @@ class DemoStore {
   }
 
   async createEntry(input: CreateEntryInput) {
-    const entry: JournalEntry = {
+    const entry: JournalEntry = attachEntryThreadsToEntry({
       id: randomUUID(),
       createdAt: new Date().toISOString(),
       rawText: input.rawText,
@@ -231,7 +277,7 @@ class DemoStore {
       userId: input.userId,
       hasOpenThreads: true,
       analysis: input.analysis,
-    }
+    })
 
     this.entries.unshift(entry)
     this.conversations.unshift({
@@ -248,14 +294,14 @@ class DemoStore {
   async updateEntry(input: UpdateEntryInput) {
     this.entries = this.entries.map((entry) =>
       entry.id === input.entryId
-        ? {
+        ? attachEntryThreadsToEntry({
             ...entry,
             rawText: input.rawText,
             title: input.title,
             tags: input.tags,
             summary: input.summary,
             analysis: input.analysis,
-          }
+          })
         : entry,
     )
 
@@ -310,7 +356,7 @@ class DemoStore {
 
   async updatePatterns(userId: string, patterns: PatternSection[]) {
     void userId
-    this.patterns = patterns
+    this.patterns = patterns.map((pattern) => decoratePatternRanking(pattern))
     return this.patterns
   }
 
@@ -322,7 +368,7 @@ class DemoStore {
     }
 
     return {
-      ...entry,
+      ...attachEntryThreadsToEntry(entry),
       conversation: this.conversations
         .filter((message) => message.entryId === entryId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
@@ -376,8 +422,7 @@ class SupabaseStore {
   private async mapEntry(entry: SupabaseEntryRow, conversations: SupabaseConversationRow[]): Promise<JournalView> {
     const analysis = parseLegacyAnalysis(entry.ai_response, entry.raw_text)
     const derivedSummary = deriveDisplaySummary(analysis?.summary?.trim() || entry.summary, entry.raw_text)
-
-    return {
+    const mappedEntry = attachEntryThreadsToEntry({
       id: entry.id,
       userId: entry.user_id,
       createdAt: entry.created_at,
@@ -389,6 +434,10 @@ class SupabaseStore {
       summary: derivedSummary,
       hasOpenThreads: entry.has_open_threads ?? false,
       analysis,
+    })
+
+    return {
+      ...mappedEntry,
       conversation: conversations.filter((message) => message.entry_id === entry.id).map((message) => this.mapConversation(message)),
     }
   }
@@ -434,17 +483,19 @@ class SupabaseStore {
       entries: entriesResponse.data.map((entry) => this.mapEntryList(entry, conversationCounts[entry.id] ?? 0)),
       selectedEntry: selectedId ? await this.getEntryView(selectedId, userId) : null,
       patternEntries: entriesResponse.data.map((entry) => ({
-        id: entry.id,
-        userId: entry.user_id,
-        createdAt: entry.created_at,
-        rawText: entry.raw_text,
-        source: entry.source,
-        title: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).title,
-        tags: entry.tags ?? [],
-        photoUrls: [],
-        summary: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).summary,
-        hasOpenThreads: entry.has_open_threads ?? false,
-        analysis: parseLegacyAnalysis(entry.ai_response, entry.raw_text),
+        ...attachEntryThreadsToEntry({
+          id: entry.id,
+          userId: entry.user_id,
+          createdAt: entry.created_at,
+          rawText: entry.raw_text,
+          source: entry.source,
+          title: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).title,
+          tags: entry.tags ?? [],
+          photoUrls: [],
+          summary: this.mapEntryList(entry, conversationCounts[entry.id] ?? 0).summary,
+          hasOpenThreads: entry.has_open_threads ?? false,
+          analysis: parseLegacyAnalysis(entry.ai_response, entry.raw_text),
+        }),
       })),
       memoryDoc: memoryResponse.data
         ? {
@@ -472,6 +523,19 @@ class SupabaseStore {
   async createEntry(input: CreateEntryInput) {
     const id = randomUUID()
     const createdAt = new Date().toISOString()
+    const preparedEntry = attachEntryThreadsToEntry({
+      id,
+      userId: input.userId,
+      createdAt,
+      rawText: input.rawText,
+      source: input.source,
+      title: input.title,
+      tags: input.tags,
+      photoUrls: input.photoUrls,
+      summary: input.summary,
+      hasOpenThreads: true,
+      analysis: input.analysis,
+    })
     const insertResponse = await this.client.from('entries').insert({
       id,
       user_id: input.userId,
@@ -482,7 +546,7 @@ class SupabaseStore {
       photo_url: input.photoUrls.length ? JSON.stringify(input.photoUrls) : null,
       summary: input.summary,
       has_open_threads: true,
-      ai_response: input.analysis,
+      ai_response: preparedEntry.analysis,
     })
     if (insertResponse.error) throw insertResponse.error
 
@@ -500,13 +564,26 @@ class SupabaseStore {
   }
 
   async updateEntry(input: UpdateEntryInput) {
+    const preparedEntry = attachEntryThreadsToEntry({
+      id: input.entryId,
+      userId: input.userId,
+      createdAt: input.createdAt,
+      rawText: input.rawText,
+      source: 'typed',
+      title: input.title,
+      tags: input.tags,
+      photoUrls: [],
+      summary: input.summary,
+      hasOpenThreads: true,
+      analysis: input.analysis,
+    })
     const updateResponse = await this.client
       .from('entries')
       .update({
         raw_text: input.rawText,
         tags: input.tags,
         summary: input.summary,
-        ai_response: input.analysis,
+        ai_response: preparedEntry.analysis,
       })
       .eq('id', input.entryId)
       .eq('user_id', input.userId)
@@ -656,18 +733,19 @@ class SupabaseStore {
     if (response.error) throw response.error
 
     return response.data.map(
-      (pattern): PatternSection => ({
-        id: pattern.id,
-        title: simplifyPatternTitle(pattern.title),
-        overview: pattern.overview,
-        status: pattern.status ?? 'active',
-        dimensions: pattern.dimensions ?? [],
-        questions: pattern.questions ?? [],
-        exploreOptions: pattern.explore_options ?? [],
-        entryIds: pattern.entry_ids ?? [],
-        entryCount: pattern.entry_count ?? (pattern.entry_ids ?? []).length,
-        updatedAt: pattern.updated_at ?? new Date().toISOString(),
-      }),
+      (pattern): PatternSection =>
+        decoratePatternRanking({
+          id: pattern.id,
+          title: simplifyPatternTitle(pattern.title),
+          overview: pattern.overview,
+          status: pattern.status ?? 'active',
+          dimensions: pattern.dimensions ?? [],
+          questions: pattern.questions ?? [],
+          exploreOptions: pattern.explore_options ?? [],
+          entryIds: pattern.entry_ids ?? [],
+          entryCount: pattern.entry_count ?? (pattern.entry_ids ?? []).length,
+          updatedAt: pattern.updated_at ?? new Date().toISOString(),
+        }),
     )
   }
 }

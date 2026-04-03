@@ -22,10 +22,10 @@ function statusNote(pattern: PatternSection) {
   return 'This theme seems durable enough to keep tracking over time.'
 }
 
-function prominenceLabel(pattern: PatternSection, index: number) {
-  if (pattern.prominence === 'dominant' || index < 2) return 'Dominant right now'
-  if (pattern.prominence === 'quiet' || pattern.entryCount <= 1) return 'Quiet signal'
-  return 'Active thread'
+function prominenceLabel(pattern: PatternSection) {
+  if (pattern.prominence === 'dominant') return `Dominant right now · score ${pattern.rankScore?.toFixed(1) ?? '—'}`
+  if (pattern.prominence === 'quiet' || pattern.entryCount <= 1) return `Quiet signal · score ${pattern.rankScore?.toFixed(1) ?? '—'}`
+  return `Active thread · score ${pattern.rankScore?.toFixed(1) ?? '—'}`
 }
 
 function patternLooksPlaceholder(pattern: PatternSection) {
@@ -44,7 +44,7 @@ function normalizeForComparison(text: string) {
 }
 
 function cleanDisplayText(text: string) {
-  return text.replace(/\bkyli\b/gi, 'skills')
+  return (text ?? '').replace(/\bkyli\b/gi, 'skills')
 }
 
 function overlapScore(left: string, right: string) {
@@ -161,17 +161,29 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
       .map((item) => ({
         entryId: item.entryId,
         title: cleanDisplayText(item.entryTitle || entriesById.get(item.entryId)?.title || 'Untitled entry'),
-        summary: cleanDisplayText(item.snippet),
+        snippet: cleanDisplayText(item.snippet),
+        threadLabel: cleanDisplayText(item.threadLabel || selectedPattern.title),
+        claim: cleanDisplayText(item.claim || selectedPattern.overview),
+        whyItMatters: cleanDisplayText(item.whyItMatters || selectedPattern.rankRationale || ''),
+        confidence: item.confidence,
+        salience: item.salience,
+        createdAt: item.createdAt,
         feedLabels: entriesById.get(item.entryId)?.feedLabels ?? [],
       }))
-      .filter((item) => item.summary)
+      .filter((item) => item.snippet)
 
     if (evidenceRows.length) return evidenceRows
 
     return supportingEntries.map((entry) => ({
       entryId: entry.id,
       title: cleanDisplayText(entry.title),
-      summary: cleanDisplayText(entry.summary),
+      snippet: cleanDisplayText(entry.summary),
+      threadLabel: cleanDisplayText(selectedPattern.title),
+      claim: cleanDisplayText(selectedPattern.dimensions[0] || selectedPattern.overview),
+      whyItMatters: cleanDisplayText(selectedPattern.rankRationale || selectedPattern.overview),
+      confidence: undefined,
+      salience: undefined,
+      createdAt: undefined,
       feedLabels: entry.feedLabels,
     }))
   }, [selectedPattern, supportingEntries])
@@ -202,9 +214,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
   )
 
   const patternGroups = useMemo(() => {
-    const dominant = patterns.slice(0, 2)
-    const supporting = patterns.slice(2).filter((pattern) => (pattern.prominence ?? (pattern.entryCount <= 1 ? 'quiet' : 'supporting')) === 'supporting')
-    const quiet = patterns.slice(2).filter((pattern) => (pattern.prominence ?? (pattern.entryCount <= 1 ? 'quiet' : 'supporting')) === 'quiet')
+    const dominant = patterns.filter((pattern) => pattern.prominence === 'dominant')
+    const supporting = patterns.filter((pattern) => (pattern.prominence ?? (pattern.entryCount <= 1 ? 'quiet' : 'supporting')) === 'supporting')
+    const quiet = patterns.filter((pattern) => (pattern.prominence ?? (pattern.entryCount <= 1 ? 'quiet' : 'supporting')) === 'quiet')
 
     return [
       {
@@ -326,10 +338,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   </div>
                   <div className="pattern-home-list">
                     {group.patterns.map((pattern) => {
-                      const globalIndex = patterns.findIndex((candidate) => candidate.id === pattern.id)
                       return (
                         <button
-                          className={`pattern-home-card ${globalIndex < 2 ? 'dominant' : ''}`}
+                          className={`pattern-home-card ${pattern.prominence === 'dominant' ? 'dominant' : ''} ${pattern.prominence === 'quiet' ? 'quiet' : ''}`}
                           key={pattern.id}
                           onClick={() => setSelectedPatternId(pattern.id)}
                           type="button"
@@ -338,9 +349,12 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                             <strong>{pattern.title}</strong>
                             <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
                           </div>
-                          <p className="pattern-prominence-copy">{prominenceLabel(pattern, globalIndex)}</p>
+                          <p className="pattern-prominence-copy">{prominenceLabel(pattern)}</p>
                           <p className="pattern-home-preview">{cleanDisplayText(pattern.overview)}</p>
-                          <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
+                          <small>
+                            {pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}
+                            {pattern.rankFactors ? ` · recurrence ${pattern.rankFactors.recurrence}/10 · freshness ${pattern.rankFactors.freshness}/10` : ''}
+                          </small>
                         </button>
                       )
                     })}
@@ -360,6 +374,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                 <div className="pattern-detail-meta">
                   <span className={`pattern-status ${selectedPattern.status}`}>{statusLabel(selectedPattern.status)}</span>
                   <span className="pattern-timestamp">{selectedPattern.entryCount} supporting entr{selectedPattern.entryCount === 1 ? 'y' : 'ies'}</span>
+                  {selectedPattern.rankScore != null ? (
+                    <span className="pattern-score-pill">Score {selectedPattern.rankScore.toFixed(1)}</span>
+                  ) : null}
                 </div>
                 <p className="pattern-status-note">{statusNote(selectedPattern)}</p>
               </div>
@@ -380,19 +397,58 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                 <div className="memory-doc">
                   <h2>{selectedPattern.title}</h2>
                   <p className="muted">
-                    This panel shows the exact snippets and entries the system is using to justify this theme.
-                    If a theme feels off, this is the first place to check whether the source evidence actually matches the label.
+                    This panel shows the exact per-entry threads that formed this theme, plus the rank logic behind why it is
+                    dominant, supporting, or quiet.
                   </p>
                   <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
 
+                  {selectedPattern.rankFactors ? (
+                    <div className="pattern-rank-grid">
+                      <article className="pattern-rank-card">
+                        <span>Recurrence</span>
+                        <strong>{selectedPattern.rankFactors.recurrence}/10</strong>
+                      </article>
+                      <article className="pattern-rank-card">
+                        <span>Coherence</span>
+                        <strong>{selectedPattern.rankFactors.coherence}/10</strong>
+                      </article>
+                      <article className="pattern-rank-card">
+                        <span>Weight</span>
+                        <strong>{selectedPattern.rankFactors.weight}/10</strong>
+                      </article>
+                      <article className="pattern-rank-card">
+                        <span>Freshness</span>
+                        <strong>{selectedPattern.rankFactors.freshness}/10</strong>
+                      </article>
+                    </div>
+                  ) : null}
+
+                  {selectedPattern.rankRationale ? (
+                    <>
+                      <h3>Why it ranks here</h3>
+                      <p>{cleanDisplayText(selectedPattern.rankRationale)}</p>
+                    </>
+                  ) : null}
+
                   {supportingEvidenceRows.length ? (
                     <>
-                      <h3>Matched source evidence</h3>
-                      <ul>
+                      <h3>Supporting entry threads</h3>
+                      <ul className="pattern-evidence-list">
                         {supportingEvidenceRows.map((item) => (
-                          <li key={`${selectedPattern.id}-${item.entryId}-${item.summary}`}>
-                            <strong>{item.title}</strong>
-                            <span> — {item.summary}</span>
+                          <li className="pattern-evidence-item" key={`${selectedPattern.id}-${item.entryId}-${item.snippet}`}>
+                            <div className="pattern-evidence-head">
+                              <strong>{item.title}</strong>
+                              <span>{item.threadLabel}</span>
+                            </div>
+                            <p>{item.claim}</p>
+                            <blockquote>{item.snippet}</blockquote>
+                            {item.whyItMatters ? <small>{item.whyItMatters}</small> : null}
+                            {item.confidence != null || item.salience != null ? (
+                              <div className="pattern-evidence-meta">
+                                {item.confidence != null ? <span>Confidence {Math.round(item.confidence * 100)}%</span> : null}
+                                {item.salience != null ? <span>Salience {Math.round(item.salience * 100)}%</span> : null}
+                              </div>
+                            ) : null}
                           </li>
                         ))}
                       </ul>
@@ -421,8 +477,13 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
             <div className="pattern-detail-grid simplified">
               {distinctDimensions.length ? (
                 <div className="pattern-column wide">
-                  <p className="subtle-label">How it shows up</p>
+                  <p className="subtle-label">What the theme is doing</p>
                   <ul className="pattern-list compact">
+                    {(selectedPattern.themeSummary ?? []).map((summaryLine) => (
+                      <li className="pattern-list-item relaxed" key={summaryLine}>
+                        <ReactMarkdown>{cleanDisplayText(summaryLine)}</ReactMarkdown>
+                      </li>
+                    ))}
                     {distinctDimensions.map((dimension) => (
                       <li className="pattern-list-item relaxed" key={dimension}>
                         <ReactMarkdown>{dimension}</ReactMarkdown>
@@ -450,9 +511,10 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
               <p className="subtle-label">Where this shows up</p>
               <div className="related-entry-list">
                 {supportingEvidenceRows.map((entry) => (
-                      <button className="related-entry-card" key={`${selectedPattern.id}-${entry.entryId}-${entry.summary}`} onClick={() => onOpenEntry(entry.entryId)} type="button">
+                  <button className="related-entry-card" key={`${selectedPattern.id}-${entry.entryId}-${entry.snippet}`} onClick={() => onOpenEntry(entry.entryId)} type="button">
                         <strong>{entry.title}</strong>
-                        <span>{entry.summary}</span>
+                        <small className="related-thread-label">{entry.threadLabel}</small>
+                        <span>{entry.snippet}</span>
                         {entry.feedLabels.length ? (
                           <div className="entry-bullets compact">
                             {entry.feedLabels.slice(0, 3).map((label) => (
@@ -460,7 +522,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                                 {cleanDisplayText(label)}
                               </span>
                             ))}
-                      </div>
+                          </div>
                     ) : null}
                   </button>
                 ))}
