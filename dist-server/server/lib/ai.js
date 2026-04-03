@@ -56,6 +56,9 @@ function slugify(text) {
 function normalizeWhitespace(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
+function repairKnownTextArtifacts(text) {
+    return text.replace(/\bkyli\b/gi, 'skills');
+}
 const DANGLING_ENDING_PATTERN = /\s+\b(?:about|after|and|around|as|at|because|before|being|but|despite|for|from|if|in|into|like|of|on|or|over|rather|so|than|that|the|to|versus|we|while|which|who|with|without)\b\s*$/i;
 const SUSPICIOUS_SHORT_FINAL_WORDS = new Set([
     'sy',
@@ -66,7 +69,7 @@ const SUSPICIOUS_SHORT_FINAL_WORDS = new Set([
     'doriousness',
 ]);
 function cleanTruncatedEnding(text) {
-    let normalized = text
+    let normalized = repairKnownTextArtifacts(text)
         .trim()
         .replace(/[.…]+\s*$/, '')
         .trim()
@@ -92,12 +95,12 @@ function cleanTruncatedEnding(text) {
     return normalized;
 }
 function stripMarkdown(text) {
-    return text
+    return repairKnownTextArtifacts(text)
         .replace(/[*_`>#-]+/g, ' ')
         .replace(/\[(.*?)\]\(.*?\)/g, '$1');
 }
 export function sanitizeJournalText(text) {
-    return text
+    return repairKnownTextArtifacts(text)
         .split('\n')
         .map((line) => normalizeWhitespace(stripMarkdown(line)))
         .filter((line) => line && line !== '---')
@@ -1045,7 +1048,7 @@ function semanticToken(token) {
         return 'depth';
     if (/^(output|produc|consum|ship|deliver|trace)/.test(token))
         return 'output';
-    if (/^(dani|attun|love|partner|close|relationship)/.test(token))
+    if (/^(dani|attun|love|close|closeness)/.test(token))
         return 'relationship';
     if (/^(collabor|team|hire|owner|who|partner)/.test(token))
         return 'collaboration';

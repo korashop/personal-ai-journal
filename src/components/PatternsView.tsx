@@ -43,6 +43,10 @@ function normalizeForComparison(text: string) {
     .trim()
 }
 
+function cleanDisplayText(text: string) {
+  return text.replace(/\bkyli\b/gi, 'skills')
+}
+
 function overlapScore(left: string, right: string) {
   const leftTokens = new Set(normalizeForComparison(left).split(' ').filter((token) => token.length > 3))
   const rightTokens = new Set(normalizeForComparison(right).split(' ').filter((token) => token.length > 3))
@@ -156,15 +160,21 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
   )
 
   const distinctDimensions = useMemo(
-    () => filterDistinctLines(selectedPattern?.dimensions ?? [], selectedPattern?.overview ?? ''),
+    () =>
+      filterDistinctLines(
+        (selectedPattern?.dimensions ?? []).map(cleanDisplayText),
+        cleanDisplayText(selectedPattern?.overview ?? ''),
+      ),
     [selectedPattern],
   )
 
   const distinctQuestions = useMemo(
     () =>
       filterDistinctLines(
-        selectedPattern?.questions ?? [],
-        `${selectedPattern?.overview ?? ''}\n${(selectedPattern?.dimensions ?? []).join('\n')}`,
+        (selectedPattern?.questions ?? []).map(cleanDisplayText),
+        `${cleanDisplayText(selectedPattern?.overview ?? '')}\n${(selectedPattern?.dimensions ?? [])
+          .map(cleanDisplayText)
+          .join('\n')}`,
       ),
     [selectedPattern],
   )
@@ -307,7 +317,7 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                             <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
                           </div>
                           <p className="pattern-prominence-copy">{prominenceLabel(pattern, globalIndex)}</p>
-                          <p className="pattern-home-preview">{pattern.overview}</p>
+                          <p className="pattern-home-preview">{cleanDisplayText(pattern.overview)}</p>
                           <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                         </button>
                       )
@@ -337,23 +347,56 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                 </button>
                 <button className="ghost-button" onClick={() => setShowMemoryInspector((current) => !current)} type="button">
                   {showMemoryInspector ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  {showMemoryInspector ? 'Hide memory' : 'Inspect memory'}
+                  {showMemoryInspector ? 'Hide evidence' : 'Inspect evidence'}
                 </button>
               </div>
             </div>
 
             {showMemoryInspector ? (
               <div className="memory-inline-drawer">
-                <p className="subtle-label">Internal memory document</p>
+                <p className="subtle-label">Why this theme exists</p>
                 <div className="memory-doc">
-                  {memoryDoc ? <ReactMarkdown>{memoryDoc.content}</ReactMarkdown> : <p className="muted">Memory will grow as you use the journal.</p>}
+                  <h2>{selectedPattern.title}</h2>
+                  <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
+
+                  {distinctDimensions.length ? (
+                    <>
+                      <h3>What the system is using as evidence</h3>
+                      <ul>
+                        {distinctDimensions.map((dimension) => (
+                          <li key={dimension}>{dimension}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+
+                  {supportingEntries.length ? (
+                    <>
+                      <h3>Supporting entries</h3>
+                      <ul>
+                        {supportingEntries.map((entry) => (
+                          <li key={entry.id}>
+                            <strong>{cleanDisplayText(entry.title)}</strong>
+                            <span> — {cleanDisplayText(entry.summary)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+
+                  <h3>Global memory snapshot</h3>
+                  {memoryDoc ? (
+                    <ReactMarkdown>{cleanDisplayText(memoryDoc.content)}</ReactMarkdown>
+                  ) : (
+                    <p className="muted">Memory will grow as you use the journal.</p>
+                  )}
                 </div>
               </div>
             ) : null}
 
             <article className="pattern-overview expanded">
               <p className="subtle-label">State of affairs</p>
-              <ReactMarkdown>{selectedPattern.overview}</ReactMarkdown>
+              <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
             </article>
 
             <div className="pattern-detail-grid simplified">
@@ -387,17 +430,17 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
             <div className="pattern-entry-links">
               <p className="subtle-label">Where this shows up</p>
               <div className="related-entry-list">
-                {supportingEntries.map((entry) => (
-                  <button className="related-entry-card" key={entry.id} onClick={() => onOpenEntry(entry.id)} type="button">
-                    <strong>{entry.title}</strong>
-                    <span>{entry.summary}</span>
-                    {entry.feedLabels.length ? (
-                      <div className="entry-bullets compact">
-                        {entry.feedLabels.slice(0, 3).map((label) => (
-                          <span className="bullet-pill" key={`${entry.id}-${label}`}>
-                            {label}
-                          </span>
-                        ))}
+                    {supportingEntries.map((entry) => (
+                      <button className="related-entry-card" key={entry.id} onClick={() => onOpenEntry(entry.id)} type="button">
+                        <strong>{cleanDisplayText(entry.title)}</strong>
+                        <span>{cleanDisplayText(entry.summary)}</span>
+                        {entry.feedLabels.length ? (
+                          <div className="entry-bullets compact">
+                            {entry.feedLabels.slice(0, 3).map((label) => (
+                              <span className="bullet-pill" key={`${entry.id}-${label}`}>
+                                {cleanDisplayText(label)}
+                              </span>
+                            ))}
                       </div>
                     ) : null}
                   </button>
