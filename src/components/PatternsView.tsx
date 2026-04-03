@@ -83,7 +83,7 @@ type ThemeMessage = {
   state?: 'pending' | 'complete'
 }
 
-export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterThemeReply, patterns }: PatternsViewProps) {
+export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, patterns }: PatternsViewProps) {
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
   const [showChatPanel, setShowChatPanel] = useState(true)
@@ -153,6 +153,28 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
     () => entries.filter((entry) => selectedPattern?.entryIds.includes(entry.id)),
     [entries, selectedPattern],
   )
+
+  const supportingEvidenceRows = useMemo(() => {
+    if (!selectedPattern) return []
+    const entriesById = new Map(supportingEntries.map((entry) => [entry.id, entry]))
+    const evidenceRows = (selectedPattern.supportingEvidence ?? [])
+      .map((item) => ({
+        entryId: item.entryId,
+        title: cleanDisplayText(item.entryTitle || entriesById.get(item.entryId)?.title || 'Untitled entry'),
+        summary: cleanDisplayText(item.snippet),
+        feedLabels: entriesById.get(item.entryId)?.feedLabels ?? [],
+      }))
+      .filter((item) => item.summary)
+
+    if (evidenceRows.length) return evidenceRows
+
+    return supportingEntries.map((entry) => ({
+      entryId: entry.id,
+      title: cleanDisplayText(entry.title),
+      summary: cleanDisplayText(entry.summary),
+      feedLabels: entry.feedLabels,
+    }))
+  }, [selectedPattern, supportingEntries])
 
   const selectedThread = useMemo(
     () => (selectedPattern ? themeThreads[selectedPattern.id] ?? [] : []),
@@ -357,11 +379,29 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                 <p className="subtle-label">Why this theme exists</p>
                 <div className="memory-doc">
                   <h2>{selectedPattern.title}</h2>
+                  <p className="muted">
+                    This panel shows the exact snippets and entries the system is using to justify this theme.
+                    If a theme feels off, this is the first place to check whether the source evidence actually matches the label.
+                  </p>
                   <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
+
+                  {supportingEvidenceRows.length ? (
+                    <>
+                      <h3>Matched source evidence</h3>
+                      <ul>
+                        {supportingEvidenceRows.map((item) => (
+                          <li key={`${selectedPattern.id}-${item.entryId}-${item.summary}`}>
+                            <strong>{item.title}</strong>
+                            <span> — {item.summary}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
 
                   {distinctDimensions.length ? (
                     <>
-                      <h3>What the system is using as evidence</h3>
+                      <h3>How those snippets were generalized</h3>
                       <ul>
                         {distinctDimensions.map((dimension) => (
                           <li key={dimension}>{dimension}</li>
@@ -369,27 +409,6 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
                       </ul>
                     </>
                   ) : null}
-
-                  {supportingEntries.length ? (
-                    <>
-                      <h3>Supporting entries</h3>
-                      <ul>
-                        {supportingEntries.map((entry) => (
-                          <li key={entry.id}>
-                            <strong>{cleanDisplayText(entry.title)}</strong>
-                            <span> — {cleanDisplayText(entry.summary)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-
-                  <h3>Global memory snapshot</h3>
-                  {memoryDoc ? (
-                    <ReactMarkdown>{cleanDisplayText(memoryDoc.content)}</ReactMarkdown>
-                  ) : (
-                    <p className="muted">Memory will grow as you use the journal.</p>
-                  )}
                 </div>
               </div>
             ) : null}
@@ -430,14 +449,14 @@ export function PatternsView({ entries, memoryDoc, onOpenEntry, onRefreshAfterTh
             <div className="pattern-entry-links">
               <p className="subtle-label">Where this shows up</p>
               <div className="related-entry-list">
-                    {supportingEntries.map((entry) => (
-                      <button className="related-entry-card" key={entry.id} onClick={() => onOpenEntry(entry.id)} type="button">
-                        <strong>{cleanDisplayText(entry.title)}</strong>
-                        <span>{cleanDisplayText(entry.summary)}</span>
+                {supportingEvidenceRows.map((entry) => (
+                      <button className="related-entry-card" key={`${selectedPattern.id}-${entry.entryId}-${entry.summary}`} onClick={() => onOpenEntry(entry.entryId)} type="button">
+                        <strong>{entry.title}</strong>
+                        <span>{entry.summary}</span>
                         {entry.feedLabels.length ? (
                           <div className="entry-bullets compact">
                             {entry.feedLabels.slice(0, 3).map((label) => (
-                              <span className="bullet-pill" key={`${entry.id}-${label}`}>
+                              <span className="bullet-pill" key={`${entry.entryId}-${label}`}>
                                 {cleanDisplayText(label)}
                               </span>
                             ))}

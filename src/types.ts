@@ -71,6 +71,11 @@ export type PatternSection = {
   dimensions: string[]
   questions: string[]
   exploreOptions: string[]
+  supportingEvidence?: Array<{
+    entryId: string
+    entryTitle: string
+    snippet: string
+  }>
   entryIds: string[]
   entryCount: number
   updatedAt: string

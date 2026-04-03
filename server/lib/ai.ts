@@ -1252,6 +1252,34 @@ function bestOpenThemeEvidenceLine(sourceLines: string[]) {
     .sort((left, right) => right.score - left.score || right.line.length - left.line.length)[0]?.line ?? ''
 }
 
+function sourceLinesForPatternEvidence(entry: JournalEntry) {
+  return [
+    ...splitIntoCandidateSentences(entry.rawText),
+    entry.summary,
+    ...(entry.analysis?.entryDigest ?? []),
+    ...(entry.analysis?.patternSignals ?? []),
+    ...(entry.analysis?.sections ?? []).flatMap((section) => [
+      section.title,
+      ...splitIntoCandidateSentences(section.content),
+    ]),
+  ]
+    .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
+    .filter((line) => line && !evidenceLooksFragmentary(line))
+}
+
+function selectPatternEvidenceSnippet(pattern: PatternSection, entry: JournalEntry) {
+  const sourceLines = sourceLinesForPatternEvidence(entry)
+  const family = themeFamilyForText(pattern.title)
+  const familyEvidence = family ? bestFamilyEvidenceLine(sourceLines, family) : ''
+  const openEvidence = bestOpenThemeEvidenceLine([
+    ...sourceLines,
+    entry.summary,
+    pattern.overview,
+  ])
+
+  return cleanTruncatedEnding(familyEvidence || openEvidence || entry.summary || '')
+}
+
 function semanticToken(token: string) {
   if (!token) return ''
   if (/^(authoriz|authoris|permiss|qualif|capab|skill|impost|entitl)/.test(token)) return 'authorization'
@@ -1882,6 +1910,15 @@ function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
       `Find the cost of ${cluster.title.toLowerCase()}`,
       `Look for the next concrete move inside ${cluster.title.toLowerCase()}`,
     ].map((item) => cleanTruncatedEnding(item)).slice(0, 3),
+    supportingEvidence: cluster.evidenceByEntry
+      .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
+      .map((item) => ({
+        entryId: item.entryId,
+        entryTitle: item.entryTitle,
+        snippet: cleanTruncatedEnding(item.evidence),
+      }))
+      .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet))
+      .slice(0, 8),
     entryIds: cluster.entryIds,
   }
 }
@@ -1990,6 +2027,7 @@ function stripPatternIdentity(
     dimensions: pattern.dimensions,
     questions: pattern.questions,
     exploreOptions: pattern.exploreOptions,
+    supportingEvidence: pattern.supportingEvidence,
     entryIds: pattern.entryIds,
   }
 }
@@ -2029,11 +2067,17 @@ function mergeEnrichedWithFallbackPatterns(
         exploreOptions: dedupePatternLines(
           [...existing.exploreOptions, ...fallback.exploreOptions],
         ).slice(0, 3),
+        supportingEvidence: fallback.supportingEvidence?.length
+          ? fallback.supportingEvidence
+          : existing.supportingEvidence,
       }
     } else if (fallback.entryIds.length > existing.entryIds.length) {
       merged[duplicateIndex] = {
         ...existing,
         entryIds: [...new Set([...existing.entryIds, ...fallback.entryIds])],
+        supportingEvidence: existing.supportingEvidence?.length
+          ? existing.supportingEvidence
+          : fallback.supportingEvidence,
       }
     }
   }
@@ -2170,6 +2214,15 @@ ${clusters
       exploreOptions: dedupePatternLines(
         (enriched.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean),
       ).slice(0, 3),
+      supportingEvidence: cluster.evidenceByEntry
+        .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
+        .map((item) => ({
+          entryId: item.entryId,
+          entryTitle: item.entryTitle,
+          snippet: cleanTruncatedEnding(item.evidence),
+        }))
+        .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet))
+        .slice(0, 8),
       entryIds: cluster.entryIds,
     }
 
@@ -2258,6 +2311,55 @@ export function buildPatternDebugReport(entries: JournalEntry[]) {
     evidenceByEntry: cluster.evidenceByEntry,
     fallbackPattern: buildDeterministicPatternFromCluster(cluster),
   }))
+}
+
+export function attachPatternSupportingEvidence(
+  patterns: PatternSection[],
+  entries: JournalEntry[],
+): PatternSection[] {
+  const entryMap = new Map(entries.map((entry) => [entry.id, entry]))
+
+  return patterns.map((pattern) => {
+    const cleanedExisting = (pattern.supportingEvidence ?? [])
+      .map((item) => ({
+        entryId: item.entryId,
+        entryTitle: simplifyPatternTitle(item.entryTitle),
+        snippet: cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(item.snippet))),
+      }))
+      .filter((item) => item.entryId && item.snippet && !evidenceLooksFragmentary(item.snippet))
+
+    if (cleanedExisting.length >= Math.min(pattern.entryIds.length, 2)) {
+      return {
+        ...pattern,
+        supportingEvidence: cleanedExisting.slice(0, 8),
+      }
+    }
+
+    const derivedEvidence = pattern.entryIds.flatMap((entryId) => {
+      const entry = entryMap.get(entryId)
+      if (!entry) return []
+      const snippet = selectPatternEvidenceSnippet(pattern, entry)
+      if (!snippet || evidenceLooksFragmentary(snippet)) return []
+      return [{
+        entryId: entry.id,
+        entryTitle: entry.title,
+        snippet,
+      }]
+    })
+
+    const dedupedSnippets = dedupePatternLines(
+      derivedEvidence.map((item) => item.snippet),
+      pattern.overview,
+    )
+
+    return {
+      ...pattern,
+      supportingEvidence: dedupedSnippets
+        .map((snippet) => derivedEvidence.find((item) => item.snippet === snippet))
+        .filter((item): item is NonNullable<typeof item> => Boolean(item))
+        .slice(0, 8),
+    }
+  })
 }
 
 export async function generateReply(

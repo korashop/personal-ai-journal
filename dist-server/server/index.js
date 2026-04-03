@@ -6,12 +6,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { buildAnalysisInput, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
+import { attachPatternSupportingEvidence, buildAnalysisInput, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
 import { getStore, isLiveStore } from './lib/store.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const frontendDistPath = join(__dirname, '../dist');
+const derivedRefreshInFlight = new Set();
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -82,8 +83,15 @@ async function refreshDerivedState(userId) {
     await store.updatePatterns(userId, patterns);
 }
 function triggerDerivedRefresh(userId) {
-    void refreshDerivedState(userId).catch((error) => {
+    if (derivedRefreshInFlight.has(userId))
+        return;
+    derivedRefreshInFlight.add(userId);
+    void refreshDerivedState(userId)
+        .catch((error) => {
         console.error('Derived refresh failed', error);
+    })
+        .finally(() => {
+        derivedRefreshInFlight.delete(userId);
     });
 }
 function shouldRefreshPatterns(entriesCount, patterns) {
@@ -150,19 +158,22 @@ app.get('/api/bootstrap', async (request, response, next) => {
         const userId = config.demoUserId;
         const data = await withTransientRetry(() => store.getBootstrap(userId, selectedEntryId));
         const needsPatternRefresh = shouldRefreshPatterns(data.patternEntries.length, data.patterns);
-        const previousPatterns = needsPatternRefresh ? [] : data.patterns;
-        const patterns = !data.patterns.length || needsPatternRefresh
-            ? await buildPatterns(data.memoryDoc, data.patternEntries, previousPatterns)
-            : data.patterns;
-        if ((!data.patterns.length || needsPatternRefresh) && patterns.length) {
-            void store.updatePatterns(userId, patterns);
+        let patterns = data.patterns;
+        if (!data.patterns.length) {
+            patterns = await buildPatterns(data.memoryDoc, data.patternEntries, []);
+            if (patterns.length) {
+                void store.updatePatterns(userId, patterns);
+            }
+        }
+        else if (needsPatternRefresh) {
+            triggerDerivedRefresh(userId);
         }
         response.json({
             entries: data.entries,
             selectedEntry: data.selectedEntry,
             memoryDoc: data.memoryDoc,
             resurfacing: chooseResurfacingCard(data.memoryDoc, data.selectedEntry ? [data.selectedEntry] : [], data.highlights),
-            patterns,
+            patterns: attachPatternSupportingEvidence(patterns, data.patternEntries),
             mode,
         });
     }
