@@ -296,6 +296,14 @@ button {
   margin: 6px 0 0;
 }
 
+.capture-status {
+  margin: 0;
+}
+
+.capture-status.active {
+  color: var(--text);
+}
+
 .capture-steps {
   display: flex;
   gap: 10px;

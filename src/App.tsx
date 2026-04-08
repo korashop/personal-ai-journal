@@ -18,6 +18,7 @@ import {
 import type { EntryListItem, EntryRecord, JournalBootstrap } from './types'
 
 type ViewMode = 'capture' | 'entries' | 'patterns' | 'chat'
+type CaptureSubmitPhase = 'idle' | 'submitting' | 'submitting_split'
 
 function sortEntries(entries: EntryListItem[]) {
   return [...entries].sort(
@@ -29,6 +30,7 @@ export default function App() {
   const [bootstrap, setBootstrap] = useState<JournalBootstrap | null>(null)
   const [view, setView] = useState<ViewMode>('capture')
   const [busy, setBusy] = useState(false)
+  const [captureSubmitPhase, setCaptureSubmitPhase] = useState<CaptureSubmitPhase>('idle')
   const [error, setError] = useState<string | null>(null)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<EntryRecord | null>(null)
@@ -105,6 +107,7 @@ export default function App() {
   }) {
     try {
       setBusy(true)
+      setCaptureSubmitPhase(payload.splitEntries?.length ? 'submitting_split' : 'submitting')
       setError(null)
       if (payload.splitEntries?.length) {
         let lastEntryId: string | null = null
@@ -129,6 +132,7 @@ export default function App() {
       setError(submitError instanceof Error ? submitError.message : 'Could not submit entry')
     } finally {
       setBusy(false)
+      setCaptureSubmitPhase('idle')
     }
   }
 
@@ -243,7 +247,7 @@ export default function App() {
             </section>
           ) : null}
 
-          {view === 'capture' ? <EntryComposer busy={busy} onSubmit={handleCreateEntry} /> : null}
+          {view === 'capture' ? <EntryComposer busy={busy} submitPhase={captureSubmitPhase} onSubmit={handleCreateEntry} /> : null}
 
           {view === 'entries' ? (
             <section className={`entries-layout ${selectedEntryId ? 'detail-open' : 'list-open'}`}>

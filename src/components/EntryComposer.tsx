@@ -5,6 +5,8 @@ import type { DragEvent, FormEvent } from 'react'
 import { transcribePhotos } from '../lib/api'
 import type { EntrySource } from '../types'
 
+const MAX_PHOTO_UPLOADS = 24
+
 type SplitCandidate = {
   id: string
   label: string
@@ -95,6 +97,7 @@ function detectSplitCandidates(text: string): SplitCandidate[] {
 
 type EntryComposerProps = {
   busy: boolean
+  submitPhase: 'idle' | 'submitting' | 'submitting_split'
   onSubmit: (payload: {
     rawText: string
     source: EntrySource
@@ -107,7 +110,40 @@ type EntryComposerProps = {
   }) => Promise<void>
 }
 
-export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
+function getCaptureStatusText(params: {
+  busy: boolean
+  submitPhase: EntryComposerProps['submitPhase']
+  reviewBusy: boolean
+  reviewReady: boolean
+  photoCount: number
+  splitCount: number
+}) {
+  const { busy, submitPhase, reviewBusy, reviewReady, photoCount, splitCount } = params
+
+  if (reviewBusy) {
+    return `Transcribing ${photoCount} page${photoCount === 1 ? '' : 's'} now...`
+  }
+
+  if (busy && submitPhase === 'submitting_split') {
+    return `Analyzing and saving ${splitCount} entries now...`
+  }
+
+  if (busy && submitPhase === 'submitting') {
+    return photoCount ? 'Transcription is done. Analysis and entry creation are in progress...' : 'Analysis and entry creation are in progress...'
+  }
+
+  if (reviewReady) {
+    return 'Transcription is ready. Review the text, then submit when it looks right.'
+  }
+
+  if (photoCount) {
+    return 'Add pages in reading order, then transcribe before submitting.'
+  }
+
+  return `HEIC, JPG, and PNG are supported. Up to ${MAX_PHOTO_UPLOADS} pages per upload.`
+}
+
+export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [rawText, setRawText] = useState('')
   const [source, setSource] = useState<EntrySource>('typed')
@@ -124,25 +160,44 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
     () => (reviewReady && !rawText.trim() ? detectSplitCandidates(transcribedText) : []),
     [rawText, reviewReady, transcribedText],
   )
+  const captureStatusText = getCaptureStatusText({
+    busy,
+    submitPhase,
+    reviewBusy,
+    reviewReady,
+    photoCount: photos.length,
+    splitCount: splitCandidates.length,
+  })
 
   function appendPhotos(nextFiles: File[]) {
+    let nextError: string | null = null
+
     setPhotos((current) => {
       const seen = new Set(current.map((photo) => `${photo.name}-${photo.lastModified}-${photo.size}`))
       const merged = [...current]
+      let skippedForLimit = 0
 
       for (const file of nextFiles) {
         const key = `${file.name}-${file.lastModified}-${file.size}`
         if (!seen.has(key)) {
+          if (merged.length >= MAX_PHOTO_UPLOADS) {
+            skippedForLimit += 1
+            continue
+          }
           seen.add(key)
           merged.push(file)
         }
+      }
+
+      if (skippedForLimit > 0) {
+        nextError = `You can upload up to ${MAX_PHOTO_UPLOADS} pages at once. ${skippedForLimit} page${skippedForLimit === 1 ? '' : 's'} were not added.`
       }
 
       return merged
     })
     setReviewReady(false)
     setTranscribedText('')
-    setReviewError(null)
+    setReviewError(nextError)
     setReviewMeta(null)
     setSubmitAsSplitEntries(false)
   }
@@ -310,7 +365,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
                 Upload in reading order. The app transcribes in the order shown below.
               </p>
               <p className="hint upload-drop-hint">
-                Drag images here or use the picker. HEIC, JPG, and PNG are supported.
+                Drag images here or use the picker. HEIC, JPG, and PNG are supported, up to {MAX_PHOTO_UPLOADS} pages at a time.
               </p>
             </div>
             <button
@@ -323,7 +378,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
             </button>
           </div>
           <input
-            accept="image/*"
+            accept="image/*,.heic,.heif"
             hidden
             multiple
             onChange={(event) => {
@@ -342,8 +397,9 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
           <div className="capture-steps">
             <span className={`capture-step ${photos.length ? 'done' : ''}`}>1. Add pages</span>
             <span className={`capture-step ${reviewReady ? 'done' : photos.length ? 'active' : ''}`}>2. Transcribe images</span>
-            <span className={`capture-step ${reviewReady ? 'active' : ''}`}>3. Submit entry</span>
+            <span className={`capture-step ${busy ? 'active' : reviewReady ? 'active' : ''}`}>3. Analyze and save</span>
           </div>
+          <p className={`hint capture-status ${reviewBusy || busy ? 'active' : ''}`}>{captureStatusText}</p>
           {photos.length ? (
             <div className="photo-page-list">
               {photos.map((photo, index) => (
@@ -353,13 +409,13 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
                     <strong>{photo.name}</strong>
                   </div>
                   <div className="photo-page-actions">
-                    <button className="ghost-button compact-icon" disabled={index === 0} onClick={() => movePhoto(index, -1)} type="button">
+                    <button className="ghost-button compact-icon" disabled={busy || reviewBusy || index === 0} onClick={() => movePhoto(index, -1)} type="button">
                       <ChevronLeft size={16} />
                     </button>
-                    <button className="ghost-button compact-icon" disabled={index === photos.length - 1} onClick={() => movePhoto(index, 1)} type="button">
+                    <button className="ghost-button compact-icon" disabled={busy || reviewBusy || index === photos.length - 1} onClick={() => movePhoto(index, 1)} type="button">
                       <ChevronRight size={16} />
                     </button>
-                    <button className="ghost-button compact-icon danger-button" onClick={() => removePhoto(photo)} type="button">
+                    <button className="ghost-button compact-icon danger-button" disabled={busy || reviewBusy} onClick={() => removePhoto(photo)} type="button">
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -370,7 +426,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
 
           {photos.length ? (
             <div className="photo-review-actions">
-              <button className="ghost-button" disabled={reviewBusy} onClick={() => void handleReviewTranscription()} type="button">
+              <button className="ghost-button" disabled={reviewBusy || busy} onClick={() => void handleReviewTranscription()} type="button">
                 {reviewBusy ? <LoaderCircle className="spin" size={16} /> : <FileText size={16} />}
                 {reviewBusy ? 'Reading photos...' : reviewReady ? 'Re-transcribe images' : 'Transcribe images'}
               </button>
@@ -451,7 +507,15 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
           type="submit"
         >
           {busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-          {busy ? 'Thinking...' : submitAsSplitEntries && splitCandidates.length ? `Submit ${splitCandidates.length} entries` : photos.length ? 'Submit reviewed entry' : 'Submit entry'}
+          {busy
+            ? submitPhase === 'submitting_split'
+              ? `Saving ${splitCandidates.length} entries...`
+              : 'Analyzing and saving...'
+            : submitAsSplitEntries && splitCandidates.length
+              ? `Submit ${splitCandidates.length} entries`
+              : photos.length
+                ? 'Submit reviewed entry'
+                : 'Submit entry'}
         </button>
       </div>
     </form>

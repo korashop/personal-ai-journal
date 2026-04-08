@@ -13,6 +13,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const frontendDistPath = join(__dirname, '../dist');
 const derivedRefreshInFlight = new Set();
+const MAX_PHOTO_UPLOADS = 24;
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -260,7 +261,7 @@ app.get('/api/patterns/debug', async (_request, response, next) => {
         next(error);
     }
 });
-app.post('/api/entries', upload.array('photos', 12), async (request, response, next) => {
+app.post('/api/entries', upload.array('photos', MAX_PHOTO_UPLOADS), async (request, response, next) => {
     try {
         const parsed = createEntrySchema.parse(request.body);
         const { store } = getStore();
@@ -320,7 +321,7 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
         next(error);
     }
 });
-app.post('/api/transcribe-photos', upload.array('photos', 12), async (request, response, next) => {
+app.post('/api/transcribe-photos', upload.array('photos', MAX_PHOTO_UPLOADS), async (request, response, next) => {
     try {
         const files = request.files ?? [];
         if (!files.length) {
@@ -508,6 +509,16 @@ app.post('/api/patterns/update', handleCompanionReply);
 app.post('/api/companion/reply', handleCompanionReply);
 app.use((error, _request, response, next) => {
     void next;
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+            response.status(400).json({
+                error: `You can upload up to ${MAX_PHOTO_UPLOADS} pages at once. Remove a few pages and try again.`,
+            });
+            return;
+        }
+        response.status(400).json({ error: 'There was a problem reading those uploaded images. Please try again.' });
+        return;
+    }
     const message = error instanceof Error ? error.message : 'Something went wrong';
     response.status(500).json({ error: message });
 });
