@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { attachPatternSupportingEvidence, buildAnalysisInput, buildPatternsBrief, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
+import { attachPatternSupportingEvidence, buildAnalysisInput, buildPatternsBrief, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generatePatternsUpdate, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
 import { getStore, isLiveStore } from './lib/store.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -96,6 +96,14 @@ const patternReplySchema = z.object({
         updatedAt: z.string().optional(),
     }),
     content: z.string().min(1),
+    userId: z.string().optional(),
+});
+const patternsUpdateSchema = z.object({
+    content: z.string().optional(),
+    thread: z.array(z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+    })).optional(),
     userId: z.string().optional(),
 });
 async function refreshDerivedState(userId) {
@@ -460,6 +468,19 @@ app.post('/api/patterns/reply', async (request, response, next) => {
         }, relatedPatternEntries, bootstrap.memoryDoc, parsed.content);
         response.json({ answer });
         triggerPatternRefreshAfterReply(userId, parsed.pattern, parsed.content, answer);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+app.post('/api/patterns/update', async (request, response, next) => {
+    try {
+        const parsed = patternsUpdateSchema.parse(request.body);
+        const userId = parsed.userId ?? config.demoUserId;
+        const { store } = getStore();
+        const bootstrap = await store.getBootstrap(userId);
+        const answer = await generatePatternsUpdate(bootstrap.patterns, bootstrap.patternEntries, bootstrap.memoryDoc, parsed.content, parsed.thread ?? []);
+        response.json({ answer });
     }
     catch (error) {
         next(error);

@@ -18,6 +18,7 @@ import {
   chooseResurfacingCard,
   generateAnalysis,
   generatePatternReply,
+  generatePatternsUpdate,
   generateReply,
   integratePatternReplyIntoMemory,
   inferTags,
@@ -125,6 +126,15 @@ const patternReplySchema = z.object({
     updatedAt: z.string().optional(),
   }),
   content: z.string().min(1),
+  userId: z.string().optional(),
+})
+
+const patternsUpdateSchema = z.object({
+  content: z.string().optional(),
+  thread: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string(),
+  })).optional(),
   userId: z.string().optional(),
 })
 
@@ -562,6 +572,27 @@ app.post('/api/patterns/reply', async (request, response, next) => {
     )
     response.json({ answer })
     triggerPatternRefreshAfterReply(userId, parsed.pattern, parsed.content, answer)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/patterns/update', async (request, response, next) => {
+  try {
+    const parsed = patternsUpdateSchema.parse(request.body)
+    const userId = parsed.userId ?? config.demoUserId
+    const { store } = getStore()
+    const bootstrap = await store.getBootstrap(userId)
+
+    const answer = await generatePatternsUpdate(
+      bootstrap.patterns,
+      bootstrap.patternEntries,
+      bootstrap.memoryDoc,
+      parsed.content,
+      parsed.thread ?? [],
+    )
+
+    response.json({ answer })
   } catch (error) {
     next(error)
   }

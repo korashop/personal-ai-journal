@@ -129,6 +129,9 @@ export type PatternReplyPayload = {
     memoryDoc?: MemoryDocument | null;
     patterns?: PatternSection[];
 };
+export type PatternsUpdatePayload = {
+    answer: string;
+};
 export type ResurfacingCard = {
     title: string;
     description: string;

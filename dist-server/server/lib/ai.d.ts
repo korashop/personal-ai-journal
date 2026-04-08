@@ -75,6 +75,10 @@ export declare function buildPatternDebugReport(entries: JournalEntry[]): {
 export declare function attachPatternSupportingEvidence(patterns: PatternSection[], entries: JournalEntry[]): PatternSection[];
 export declare function generateReply(entry: JournalEntry, userReply: string, context: Context): Promise<string>;
 export declare function generatePatternReply(pattern: PatternSection, relatedEntries: JournalEntry[], memoryDoc: MemoryDocumentRecord | null, userMessage: string): Promise<string>;
+export declare function generatePatternsUpdate(patterns: PatternSection[], entries: JournalEntry[], memoryDoc: MemoryDocumentRecord | null, userMessage?: string, thread?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+}>): Promise<string>;
 export declare function integratePatternReplyIntoMemory(currentMemory: MemoryDocumentRecord | null, pattern: PatternSection, userMessage: string, answer: string): Promise<string>;
 export declare function transcribeJournalPhotos(files: UploadedPhoto[]): Promise<string>;
 export declare function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]): Promise<TranscriptionResult>;

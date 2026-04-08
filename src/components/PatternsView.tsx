@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, LoaderCircle, MessageSquareText, Send, Sparkles
 import ReactMarkdown from 'react-markdown'
 import type { FormEvent } from 'react'
 
-import { createPatternReply } from '../lib/api'
+import { createPatternReply, createPatternsUpdate } from '../lib/api'
 import type { EntryListItem, MemoryDocument, PatternSection, PatternsBrief } from '../types'
 
 function statusLabel(status: PatternSection['status']) {
@@ -55,12 +55,6 @@ function sourceTypeLabel(sourceType?: 'raw_quote' | 'analysis_quote' | 'summary_
   return 'Fallback summary'
 }
 
-function briefBulletLabel(kind: PatternsBrief['bullets'][number]['kind']) {
-  if (kind === 'durable') return 'Stable undercurrent'
-  if (kind === 'recent') return 'More alive lately'
-  return 'What this may be asking'
-}
-
 function overlapScore(left: string, right: string) {
   const leftTokens = new Set(normalizeForComparison(left).split(' ').filter((token) => token.length > 3))
   const rightTokens = new Set(normalizeForComparison(right).split(' ').filter((token) => token.length > 3))
@@ -103,7 +97,8 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
   const [showBrief, setShowBrief] = useState(false)
-  const [showExpandedBrief, setShowExpandedBrief] = useState(false)
+  const [updateMessage, setUpdateMessage] = useState('')
+  const [updateThread, setUpdateThread] = useState<ThemeMessage[]>([])
   const [showChatPanel, setShowChatPanel] = useState(true)
   const [message, setMessage] = useState('')
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
@@ -118,6 +113,11 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
       if (stored) {
         setThemeThreads(JSON.parse(stored) as Record<string, ThemeMessage[]>)
       }
+      const storedUpdateThread = window.localStorage.getItem('journal-patterns-update-thread')
+      if (storedUpdateThread) {
+        setUpdateThread(JSON.parse(storedUpdateThread) as ThemeMessage[])
+        setShowBrief(true)
+      }
     } catch {
       // Ignore local storage issues and keep the thread in-memory only.
     }
@@ -126,10 +126,11 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
   useEffect(() => {
     try {
       window.localStorage.setItem('journal-theme-threads', JSON.stringify(themeThreads))
+      window.localStorage.setItem('journal-patterns-update-thread', JSON.stringify(updateThread))
     } catch {
       // Ignore local storage issues and keep the thread in-memory only.
     }
-  }, [themeThreads])
+  }, [themeThreads, updateThread])
 
   useEffect(() => {
     if (!patterns.length) {
@@ -146,19 +147,10 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     setShowChatPanel(true)
   }, [selectedPatternId])
 
-  const briefBulletSignature = useMemo(
-    () => (patternsBrief?.bullets ?? []).map((bullet) => `${bullet.kind}:${bullet.text}`).join('|'),
-    [patternsBrief?.bullets],
-  )
-
-  useEffect(() => {
-    setShowExpandedBrief(false)
-  }, [briefBulletSignature, patternsBrief?.expandedOverview?.paragraphs])
-
   useEffect(() => {
     if (!patternsBrief) {
       setShowBrief(false)
-      setShowExpandedBrief(false)
+      setUpdateThread([])
     }
   }, [patternsBrief])
 
@@ -324,7 +316,81 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     try {
       setBriefBusy(true)
       await onGenerateBrief()
+      const response = await createPatternsUpdate()
+      setUpdateThread([
+        {
+          id: `patterns-update-assistant-${Date.now()}`,
+          role: 'assistant',
+          content: response.answer,
+          state: 'complete',
+        },
+      ])
+      setUpdateMessage('')
       setShowBrief(true)
+    } finally {
+      setBriefBusy(false)
+    }
+  }
+
+  async function handleUpdateSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!updateMessage.trim()) return
+
+    const question = updateMessage.trim()
+    const pendingAssistantId = `patterns-update-assistant-pending-${Date.now()}`
+
+    try {
+      setBriefBusy(true)
+      setUpdateThread((current) => [
+        ...current,
+        {
+          id: `patterns-update-user-${Date.now()}`,
+          role: 'user',
+          content: question,
+        },
+        {
+          id: pendingAssistantId,
+          role: 'assistant',
+          content: 'Thinking this through...',
+          state: 'pending',
+        },
+      ])
+      setUpdateMessage('')
+
+      const response = await createPatternsUpdate({
+        content: question,
+        thread: [...updateThread, {
+          role: 'user' as const,
+          content: question,
+        }].map((item) => ({
+          role: item.role,
+          content: item.content,
+        })),
+      })
+
+      setUpdateThread((current) =>
+        current.map((threadMessage) =>
+          threadMessage.id === pendingAssistantId
+            ? {
+                ...threadMessage,
+                content: response.answer,
+                state: 'complete',
+              }
+            : threadMessage,
+        ),
+      )
+    } catch {
+      setUpdateThread((current) =>
+        current.map((threadMessage) =>
+          threadMessage.id === pendingAssistantId
+            ? {
+                ...threadMessage,
+                content: 'That update did not come through. Try sending it again.',
+                state: 'complete',
+              }
+            : threadMessage,
+        ),
+      )
     } finally {
       setBriefBusy(false)
     }
@@ -439,21 +505,10 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                             {briefBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
                             {briefBusy ? 'Refreshing update...' : 'Refresh update'}
                           </button>
-                          {patternsBrief.expandedOverview ? (
-                            <button
-                              className="ghost-button brief-toggle-button"
-                              onClick={() => setShowExpandedBrief((current) => !current)}
-                              type="button"
-                            >
-                              {showExpandedBrief ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                              {showExpandedBrief ? 'Hide summary' : 'Longer summary'}
-                            </button>
-                          ) : null}
                           <button
                             className="ghost-button brief-toggle-button"
                             onClick={() => {
                               setShowBrief(false)
-                              setShowExpandedBrief(false)
                             }}
                             type="button"
                           >
@@ -462,35 +517,24 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                         </div>
                       </div>
 
-                      {!showExpandedBrief && patternsBrief.bullets.length ? (
-                        <div className="pattern-brief-section">
-                          <ul className="pattern-brief-list">
-                            {patternsBrief.bullets.map((bullet) => (
-                              <li key={`${bullet.kind}-${bullet.text}`}>
-                                <span className="pattern-brief-kicker">{briefBulletLabel(bullet.kind)}</span>
-                                <span>{bullet.text}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-
-                      {showExpandedBrief && patternsBrief.expandedOverview ? (
-                        <div className="pattern-brief-expanded">
-                          <div className="pattern-brief-memo">
-                            {patternsBrief.expandedOverview.paragraphs.map((paragraph) => (
-                              <p className="pattern-brief-summary" key={paragraph}>{paragraph}</p>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
+                      <div className="conversation-list pattern-thread pattern-brief-thread">
+                        {updateThread.map((threadMessage) => (
+                          <article className={`message ${threadMessage.role} ${threadMessage.state === 'pending' ? 'pending' : ''}`} key={threadMessage.id}>
+                            <div className="message-meta">
+                              <span>{threadMessage.role === 'user' ? 'You' : 'Journal'}</span>
+                              {threadMessage.state === 'pending' ? <span>Writing...</span> : null}
+                            </div>
+                            <ReactMarkdown>{threadMessage.content}</ReactMarkdown>
+                          </article>
+                        ))}
+                      </div>
 
                       {briefPrompt ? (
                         <div className="pattern-brief-prompts">
-                          <p className="subtle-label">Worth asking</p>
+                          <p className="subtle-label">Good follow-up</p>
                           <button
                             className="option-chip option-chip-inline"
-                            onClick={() => openPattern(briefPrompt.patternId, briefPrompt.text)}
+                            onClick={() => setUpdateMessage(briefPrompt.text)}
                             type="button"
                           >
                             <Sparkles size={14} />
@@ -498,13 +542,26 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                           </button>
                         </div>
                       ) : null}
+
+                      <form className="reply-form pattern-chat pattern-brief-chat" onSubmit={handleUpdateSubmit}>
+                        <textarea
+                          onChange={(event) => setUpdateMessage(event.target.value)}
+                          placeholder="Ask what seems most important, what this is really about, or what you may be missing."
+                          rows={4}
+                          value={updateMessage}
+                        />
+                        <button className="primary-button" disabled={briefBusy || !updateMessage.trim()} type="submit">
+                          {briefBusy ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}
+                          {briefBusy ? 'Thinking...' : 'Send'}
+                        </button>
+                      </form>
                     </section>
                   ) : (
                     <section className="pattern-brief-launcher">
                       <div className="pattern-brief-header">
                         <p className="subtle-label">Update</p>
                         <p className="pattern-brief-launcher-copy">
-                          Generate a current read on what feels steady, what has sharpened lately, and what may matter next.
+                          Ask for a current take on where things stand, then keep the conversation going from there.
                         </p>
                       </div>
                       <button

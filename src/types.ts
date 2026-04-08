@@ -142,6 +142,10 @@ export type PatternReplyPayload = {
   patterns?: PatternSection[]
 }
 
+export type PatternsUpdatePayload = {
+  answer: string
+}
+
 export type ResurfacingCard = {
   title: string
   description: string

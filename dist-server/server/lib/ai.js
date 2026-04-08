@@ -2973,6 +2973,63 @@ ${clipForPrompt(userMessage, 600)}`;
         .join('\n')
         .trim();
 }
+export async function generatePatternsUpdate(patterns, entries, memoryDoc, userMessage, thread = []) {
+    const sortedPatterns = [...patterns].sort(compareThemePriority).slice(0, 5);
+    const brief = buildPatternsBrief(sortedPatterns);
+    const defaultAsk = 'Knowing what you know about me from the journal, what is your take on where things stand right now and what questions matter most?';
+    const effectiveMessage = userMessage?.trim() || defaultAsk;
+    if (!anthropic) {
+        const briefLines = brief?.expandedOverview?.paragraphs?.length
+            ? brief.expandedOverview.paragraphs
+            : brief?.bullets.map((item) => formatPatternSentence(item.text)).slice(0, 2) ?? [];
+        const questionLine = brief?.prompt?.text ? `\n\nQuestion worth pressure-testing: ${brief.prompt.text}` : '';
+        return `${briefLines.join('\n\n')}${questionLine}`.trim() || 'The journal suggests a few live themes, but there is not enough context yet for a meaningful update.';
+    }
+    const prompt = `You are the user's reflective thought partner inside their journal product.
+They have clicked a button that is basically asking: "Knowing what you know about me, what's your take on where things stand for me right now and what questions matter most?"
+
+Your job:
+- Give a short, fluid update that feels like a sharp companion's take, not a dashboard summary.
+- Synthesize across the journal and current patterns into life-level language.
+- Focus on what seems most alive, what tension matters most, and what questions seem worth sitting with.
+
+Style rules:
+- 2 to 4 short paragraphs max.
+- You may end with 1 or 2 brief bullet questions if genuinely helpful.
+- No headings unless the user explicitly asked for structure.
+- Do not sound like a therapeutic template or self-help article.
+- Do not repeat the same point in different wording.
+- Do not list theme names unless truly necessary.
+- Prefer concrete, human language over taxonomy words like "undercurrent", "pattern", or "signal".
+
+Living memory:
+${memoryForPrompt(memoryDoc, 1800)}
+
+Current themes:
+${sortedPatterns.map((pattern) => `- ${pattern.title}: ${pattern.overview}`).join('\n') || 'None yet'}
+
+Recent shifts:
+${sortedPatterns.flatMap((pattern) => (pattern.changeSummary ?? []).slice(0, 1).map((item) => `- ${pattern.title}: ${item}`)).join('\n') || 'No explicit recent shift notes.'}
+
+Recent entries:
+${recentEntriesForPrompt(entries.map((entry) => ({ ...entry, summary: `${entry.title}: ${entry.summary}` })), 6, 220)}
+
+Conversation so far:
+${thread.slice(-6).map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${clipForPrompt(message.content, 500)}`).join('\n\n') || 'No prior messages.'}
+
+User message:
+${clipForPrompt(effectiveMessage, 700)}`;
+    const response = await anthropic.messages.create({
+        model: config.anthropicModel,
+        max_tokens: 700,
+        messages: [{ role: 'user', content: prompt }],
+    });
+    return response.content
+        .filter((item) => item.type === 'text')
+        .map((item) => item.text)
+        .join('\n')
+        .trim();
+}
 export async function integratePatternReplyIntoMemory(currentMemory, pattern, userMessage, answer) {
     if (!anthropic) {
         const existing = currentMemory?.content?.trim();
