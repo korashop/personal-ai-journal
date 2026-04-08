@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { attachPatternSupportingEvidence, buildAnalysisInput, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
+import { attachPatternSupportingEvidence, buildAnalysisInput, buildPatternsBrief, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
 import { getStore, isLiveStore } from './lib/store.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -199,12 +199,14 @@ app.get('/api/bootstrap', async (request, response, next) => {
         else if (needsPatternRefresh) {
             triggerDerivedRefresh(userId);
         }
+        const attachedPatterns = attachPatternSupportingEvidence(patterns, data.patternEntries);
         response.json({
             entries: data.entries,
             selectedEntry: data.selectedEntry,
             memoryDoc: data.memoryDoc,
             resurfacing: chooseResurfacingCard(data.memoryDoc, data.selectedEntry ? [data.selectedEntry] : [], data.highlights),
-            patterns: attachPatternSupportingEvidence(patterns, data.patternEntries),
+            patterns: attachedPatterns,
+            patternsBrief: buildPatternsBrief(attachedPatterns),
             mode,
         });
     }

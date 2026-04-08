@@ -10,6 +10,7 @@ import { config } from './config.js'
 import {
   attachPatternSupportingEvidence,
   buildAnalysisInput,
+  buildPatternsBrief,
   buildEntryTitle,
   buildPatternDebugReport,
   buildPatterns,
@@ -259,6 +260,8 @@ app.get('/api/bootstrap', async (request, response, next) => {
       triggerDerivedRefresh(userId)
     }
 
+    const attachedPatterns = attachPatternSupportingEvidence(patterns, data.patternEntries)
+
     response.json({
       entries: data.entries,
       selectedEntry: data.selectedEntry,
@@ -268,7 +271,8 @@ app.get('/api/bootstrap', async (request, response, next) => {
         data.selectedEntry ? [data.selectedEntry] : [],
         data.highlights,
       ),
-      patterns: attachPatternSupportingEvidence(patterns, data.patternEntries),
+      patterns: attachedPatterns,
+      patternsBrief: buildPatternsBrief(attachedPatterns),
       mode,
     })
   } catch (error) {

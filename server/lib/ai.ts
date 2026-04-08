@@ -10,6 +10,7 @@ import type {
   JournalEntry,
   MemoryDocumentRecord,
   PatternSection,
+  PatternsBrief,
   ResurfacingCard,
   ThreadSnippet,
 } from '../types.js'
@@ -2402,6 +2403,75 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
 
 export function decoratePatternRanking(pattern: PatternSection): PatternSection {
   return buildThemeRankMetadata(pattern)
+}
+
+function buildBriefWhyNow(pattern: PatternSection) {
+  const candidate = [
+    pattern.changeSummary?.[0] ?? '',
+    pattern.detailNarrative?.[0] ?? '',
+    pattern.themeSummary?.[0] ?? '',
+    pattern.dimensions[0] ?? '',
+    pattern.overview,
+  ].find((item) => item && item.trim())
+
+  return clipAtWord(sanitizePatternOverviewText(candidate || pattern.overview), 150)
+}
+
+function buildBriefPrompt(pattern: PatternSection) {
+  const candidate = dedupePatternLines([
+    ...(pattern.exploreOptions ?? []),
+    ...(pattern.questions ?? []),
+  ], pattern.overview)[0]
+
+  if (candidate) {
+    return clipAtWord(cleanTruncatedEnding(candidate), 140)
+  }
+
+  return pattern.changeSummary?.length
+    ? 'What changed recently here?'
+    : 'What feels most worth testing here right now?'
+}
+
+export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
+  if (!patterns.length) return null
+
+  const sorted = [...patterns].sort(compareThemePriority)
+  const focusPatterns = sorted.filter((pattern) => pattern.prominence !== 'quiet').slice(0, 3)
+  const sourcePatterns = focusPatterns.length ? focusPatterns : sorted.slice(0, 3)
+  const leadPattern = sourcePatterns[0]
+
+  if (!leadPattern) return null
+
+  const focus = sourcePatterns.map((pattern) => ({
+    patternId: pattern.id,
+    title: pattern.title,
+    whyNow: buildBriefWhyNow(pattern),
+  }))
+
+  const prompts = sourcePatterns
+    .map((pattern) => ({
+      patternId: pattern.id,
+      text: buildBriefPrompt(pattern),
+    }))
+    .filter((prompt, index, items) =>
+      items.findIndex((candidate) => normalizeWhitespace(candidate.text).toLowerCase() === normalizeWhitespace(prompt.text).toLowerCase()) === index,
+    )
+    .slice(0, 4)
+
+  const trailingTitles = sourcePatterns.slice(1).map((pattern) => pattern.title)
+  const summary =
+    trailingTitles.length >= 2
+      ? `${leadPattern.title} leads the map right now, while ${trailingTitles[0]} and ${trailingTitles[1]} still feel live in the background.`
+      : trailingTitles.length === 1
+        ? `${leadPattern.title} looks most live right now, with ${trailingTitles[0]} also worth attention.`
+        : `${leadPattern.title} looks like the clearest place to start today.`
+
+  return {
+    headline: `${leadPattern.title} is the clearest place to start.`,
+    summary,
+    focus,
+    prompts,
+  }
 }
 
 function compareThemePriority(

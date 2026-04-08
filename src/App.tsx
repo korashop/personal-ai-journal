@@ -254,6 +254,7 @@ export default function App() {
             <PatternsView
               entries={entries}
               memoryDoc={bootstrap.memoryDoc}
+              patternsBrief={bootstrap.patternsBrief}
               onOpenEntry={(entryId) => {
                 setError(null)
                 setSelectedEntryId(entryId)

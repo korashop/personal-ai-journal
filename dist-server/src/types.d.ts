@@ -110,6 +110,19 @@ export type PatternSection = {
     entryCount: number;
     updatedAt: string;
 };
+export type PatternsBrief = {
+    headline: string;
+    summary: string;
+    focus: Array<{
+        patternId: string;
+        title: string;
+        whyNow: string;
+    }>;
+    prompts: Array<{
+        patternId: string;
+        text: string;
+    }>;
+};
 export type PatternReplyPayload = {
     answer: string;
     memoryDoc?: MemoryDocument | null;
@@ -126,6 +139,7 @@ export type JournalBootstrap = {
     memoryDoc: MemoryDocument | null;
     resurfacing: ResurfacingCard | null;
     patterns: PatternSection[];
+    patternsBrief: PatternsBrief | null;
     mode: 'demo' | 'live';
 };
 export type CreateEntryPayload = {

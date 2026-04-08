@@ -138,6 +138,20 @@ export type PatternSection = {
   updatedAt: string
 }
 
+export type PatternsBrief = {
+  headline: string
+  summary: string
+  focus: Array<{
+    patternId: string
+    title: string
+    whyNow: string
+  }>
+  prompts: Array<{
+    patternId: string
+    text: string
+  }>
+}
+
 export type JournalBootstrapRecord = {
   entries: EntryListRecord[]
   selectedEntry: JournalView | null
@@ -145,4 +159,5 @@ export type JournalBootstrapRecord = {
   memoryDoc: MemoryDocumentRecord | null
   highlights: HighlightRecord[]
   patterns: PatternSection[]
+  patternsBrief?: PatternsBrief | null
 }

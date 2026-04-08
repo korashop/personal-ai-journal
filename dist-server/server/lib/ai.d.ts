@@ -1,4 +1,4 @@
-import type { AnalysisPayload, EntryThread, HighlightRecord, JournalEntry, MemoryDocumentRecord, PatternSection, ResurfacingCard } from '../types.js';
+import type { AnalysisPayload, EntryThread, HighlightRecord, JournalEntry, MemoryDocumentRecord, PatternSection, PatternsBrief, ResurfacingCard } from '../types.js';
 type Context = {
     memoryDoc: MemoryDocumentRecord | null;
     recentEntries: JournalEntry[];
@@ -28,6 +28,7 @@ export declare function chooseResurfacingCard(memoryDoc: MemoryDocumentRecord | 
 export declare function buildEntryThreads(entry: JournalEntry): EntryThread[];
 export declare function sanitizePatternOverviewText(text: string): string;
 export declare function decoratePatternRanking(pattern: PatternSection): PatternSection;
+export declare function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null;
 export declare function buildPatterns(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], previousPatterns?: PatternSection[]): Promise<PatternSection[]>;
 export declare function buildPatternDebugReport(entries: JournalEntry[]): {
     clusterId: string;

@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import type { FormEvent } from 'react'
 
 import { createPatternReply } from '../lib/api'
-import type { EntryListItem, MemoryDocument, PatternSection } from '../types'
+import type { EntryListItem, MemoryDocument, PatternSection, PatternsBrief } from '../types'
 
 function statusLabel(status: PatternSection['status']) {
   if (status === 'deepening') return 'Deepening'
@@ -86,6 +86,7 @@ type PatternsViewProps = {
   entries: EntryListItem[]
   memoryDoc: MemoryDocument | null
   patterns: PatternSection[]
+  patternsBrief: PatternsBrief | null
   onOpenEntry: (entryId: string) => void
   onRefreshAfterThemeReply: () => Promise<void>
 }
@@ -97,7 +98,7 @@ type ThemeMessage = {
   state?: 'pending' | 'complete'
 }
 
-export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, patterns }: PatternsViewProps) {
+export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, patterns, patternsBrief }: PatternsViewProps) {
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
   const [showChatPanel, setShowChatPanel] = useState(true)
@@ -278,6 +279,30 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     ].filter((group) => group.patterns.length)
   }, [patterns])
 
+  const engagementPrompts = useMemo(
+    () =>
+      filterDistinctLines(
+        [
+          ...(patternsBrief?.prompts
+            .filter((prompt) => prompt.patternId === selectedPattern?.id)
+            .map((prompt) => cleanDisplayText(prompt.text)) ?? []),
+          ...(selectedPattern?.changeSummary?.length ? ['What changed recently here?'] : []),
+          selectedPattern?.exploreOptions[0] ? cleanDisplayText(selectedPattern.exploreOptions[0]) : '',
+          selectedPattern?.questions[0] ? cleanDisplayText(selectedPattern.questions[0]) : '',
+          'What would be a small real-world test of this theme?',
+          'What evidence would make this theme less true?',
+        ].filter(Boolean),
+        cleanDisplayText(selectedPattern?.overview ?? ''),
+      ).slice(0, 4),
+    [patternsBrief?.prompts, selectedPattern],
+  )
+
+  function openPattern(patternId: string, nextMessage?: string) {
+    setSelectedPatternId(patternId)
+    setShowChatPanel(true)
+    setMessage(nextMessage ?? '')
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedPattern || !message.trim()) return
@@ -355,7 +380,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
             <button
               className={`pattern-nav-item compact ${selectedPattern.id === pattern.id ? 'selected' : ''}`}
               key={pattern.id}
-              onClick={() => setSelectedPatternId(pattern.id)}
+              onClick={() => openPattern(pattern.id)}
               type="button"
             >
               <span className="pattern-nav-title">{pattern.title}</span>
@@ -367,9 +392,54 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
       <div className="patterns-detail">
         {!selectedPattern ? (
           <div className="panel pattern-focus">
-            <div className="pattern-home-stack">
-              {patternGroups.map((group) => (
-                <section className="pattern-tier-section" key={group.id}>
+              <div className="pattern-home-stack">
+                {patternsBrief ? (
+                  <section className="pattern-brief-card">
+                    <div className="pattern-brief-header">
+                      <p className="subtle-label">Today in patterns</p>
+                      <h3>{patternsBrief.headline}</h3>
+                      <p className="pattern-brief-summary">{patternsBrief.summary}</p>
+                    </div>
+
+                    {patternsBrief.focus.length ? (
+                      <div className="pattern-brief-focus-list">
+                        {patternsBrief.focus.map((item) => (
+                          <button
+                            className="pattern-brief-focus-item"
+                            key={item.patternId}
+                            onClick={() => openPattern(item.patternId)}
+                            type="button"
+                          >
+                            <strong>{item.title}</strong>
+                            <span>{shortDisplayText(item.whyNow, 140)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {patternsBrief.prompts.length ? (
+                      <div className="pattern-brief-prompts">
+                        <p className="subtle-label">Good place to start</p>
+                        <div className="explore-options">
+                          {patternsBrief.prompts.map((prompt) => (
+                            <button
+                              className="option-chip"
+                              key={`${prompt.patternId}-${prompt.text}`}
+                              onClick={() => openPattern(prompt.patternId, prompt.text)}
+                              type="button"
+                            >
+                              <Sparkles size={14} />
+                              {prompt.text}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {patternGroups.map((group) => (
+                  <section className="pattern-tier-section" key={group.id}>
                   <div className="pattern-tier-header">
                     <p className="subtle-label">{group.title}</p>
                     <p className="pattern-tier-summary">{group.summary}</p>
@@ -380,7 +450,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                         <button
                           className={`pattern-home-card ${pattern.prominence === 'dominant' ? 'dominant' : ''} ${pattern.prominence === 'quiet' ? 'quiet' : ''}`}
                           key={pattern.id}
-                          onClick={() => setSelectedPatternId(pattern.id)}
+                          onClick={() => openPattern(pattern.id)}
                           type="button"
                         >
                           <div className="pattern-home-meta">
@@ -576,12 +646,12 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
 
               {showChatPanel ? (
                 <>
-                  {selectedPattern.exploreOptions.length ? (
+                  {engagementPrompts.length ? (
                     <div className="pattern-explore">
-                      <p className="subtle-label">Starter questions</p>
+                      <p className="subtle-label">Ways to engage</p>
                       <p className="hint">Tap one to drop it into the chat box, then edit or send it.</p>
                       <div className="explore-options stacked">
-                        {selectedPattern.exploreOptions.map((option) => (
+                        {engagementPrompts.map((option) => (
                           <button className="option-chip" key={option} onClick={() => setMessage(option)} type="button">
                             <Sparkles size={14} />
                             {option}
