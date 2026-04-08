@@ -88,6 +88,7 @@ type PatternsViewProps = {
   patterns: PatternSection[]
   patternsBrief: PatternsBrief | null
   onOpenEntry: (entryId: string) => void
+  onGenerateBrief: () => Promise<void>
   onRefreshAfterThemeReply: () => Promise<void>
 }
 
@@ -98,14 +99,16 @@ type ThemeMessage = {
   state?: 'pending' | 'complete'
 }
 
-export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, patterns, patternsBrief }: PatternsViewProps) {
+export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshAfterThemeReply, patterns, patternsBrief }: PatternsViewProps) {
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
+  const [showBrief, setShowBrief] = useState(false)
   const [showExpandedBrief, setShowExpandedBrief] = useState(false)
   const [showChatPanel, setShowChatPanel] = useState(true)
   const [message, setMessage] = useState('')
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
   const [busy, setBusy] = useState(false)
+  const [briefBusy, setBriefBusy] = useState(false)
   const [refreshingThread, setRefreshingThread] = useState(false)
   const [staleSyncAttempts, setStaleSyncAttempts] = useState(0)
 
@@ -151,6 +154,13 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
   useEffect(() => {
     setShowExpandedBrief(false)
   }, [briefBulletSignature, patternsBrief?.expandedOverview?.summary])
+
+  useEffect(() => {
+    if (!patternsBrief) {
+      setShowBrief(false)
+      setShowExpandedBrief(false)
+    }
+  }, [patternsBrief])
 
   useEffect(() => {
     if ((patterns.length > 5 && !patterns.some(patternLooksPlaceholder)) || entries.length < 10) {
@@ -310,6 +320,16 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     setMessage(nextMessage ?? '')
   }
 
+  async function handleGenerateBrief() {
+    try {
+      setBriefBusy(true)
+      await onGenerateBrief()
+      setShowBrief(true)
+    } finally {
+      setBriefBusy(false)
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedPattern || !message.trim()) return
@@ -403,74 +423,115 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
           <div className="panel pattern-focus">
               <div className="pattern-home-stack">
                 {patternsBrief ? (
-                  <section className="pattern-brief-card">
-                    <div className="pattern-brief-topbar">
-                      <div className="pattern-brief-header">
-                        <p className="subtle-label">{patternsBrief.title}</p>
-                      </div>
-                      {patternsBrief.expandedOverview ? (
-                        <button
-                          className="ghost-button brief-toggle-button"
-                          onClick={() => setShowExpandedBrief((current) => !current)}
-                          type="button"
-                        >
-                          {showExpandedBrief ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          {showExpandedBrief ? 'Hide overview' : 'Expand overview'}
-                        </button>
-                      ) : null}
-                    </div>
-
-                    {!showExpandedBrief && patternsBrief.bullets.length ? (
-                      <div className="pattern-brief-section">
-                        <ul className="pattern-brief-list">
-                          {patternsBrief.bullets.map((bullet) => (
-                            <li key={`${bullet.kind}-${bullet.text}`}>
-                              <span className="pattern-brief-kicker">{briefBulletLabel(bullet.kind)}</span>
-                              <span>{bullet.text}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-
-                    {showExpandedBrief && patternsBrief.expandedOverview ? (
-                      <div className="pattern-brief-expanded">
-                        {patternsBrief.expandedOverview.summary ? (
-                          <div className="pattern-brief-summary-block">
-                            <p className="subtle-label">Overall read</p>
-                            <p className="pattern-brief-summary">{patternsBrief.expandedOverview.summary}</p>
-                          </div>
-                        ) : null}
-
-                        <div className="pattern-brief-expanded-sections">
-                          {patternsBrief.expandedOverview.sections.map((section) => (
-                            <section className="pattern-brief-expanded-section" key={section.title}>
-                              <p className="subtle-label">{section.title}</p>
-                              <ul className="pattern-brief-list compact">
-                                {section.lines.map((line) => (
-                                  <li key={line}>{line}</li>
-                                ))}
-                              </ul>
-                            </section>
-                          ))}
+                  showBrief ? (
+                    <section className="pattern-brief-card">
+                      <div className="pattern-brief-topbar">
+                        <div className="pattern-brief-header">
+                          <p className="subtle-label">{patternsBrief.title}</p>
+                        </div>
+                        <div className="pattern-brief-actions">
+                          <button
+                            className="ghost-button brief-toggle-button"
+                            disabled={briefBusy}
+                            onClick={() => void handleGenerateBrief()}
+                            type="button"
+                          >
+                            {briefBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                            {briefBusy ? 'Refreshing update...' : 'Refresh update'}
+                          </button>
+                          {patternsBrief.expandedOverview ? (
+                            <button
+                              className="ghost-button brief-toggle-button"
+                              onClick={() => setShowExpandedBrief((current) => !current)}
+                              type="button"
+                            >
+                              {showExpandedBrief ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                              {showExpandedBrief ? 'Hide overview' : 'Expand overview'}
+                            </button>
+                          ) : null}
+                          <button
+                            className="ghost-button brief-toggle-button"
+                            onClick={() => {
+                              setShowBrief(false)
+                              setShowExpandedBrief(false)
+                            }}
+                            type="button"
+                          >
+                            Hide update
+                          </button>
                         </div>
                       </div>
-                    ) : null}
 
-                    {briefPrompt ? (
-                      <div className="pattern-brief-prompts">
-                        <p className="subtle-label">Worth asking</p>
-                        <button
-                          className="option-chip option-chip-inline"
-                          onClick={() => openPattern(briefPrompt.patternId, briefPrompt.text)}
-                          type="button"
-                        >
-                          <Sparkles size={14} />
-                          {briefPrompt.text}
-                        </button>
+                      {!showExpandedBrief && patternsBrief.bullets.length ? (
+                        <div className="pattern-brief-section">
+                          <ul className="pattern-brief-list">
+                            {patternsBrief.bullets.map((bullet) => (
+                              <li key={`${bullet.kind}-${bullet.text}`}>
+                                <span className="pattern-brief-kicker">{briefBulletLabel(bullet.kind)}</span>
+                                <span>{bullet.text}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {showExpandedBrief && patternsBrief.expandedOverview ? (
+                        <div className="pattern-brief-expanded">
+                          {patternsBrief.expandedOverview.summary ? (
+                            <div className="pattern-brief-summary-block">
+                              <p className="subtle-label">Overall read</p>
+                              <p className="pattern-brief-summary">{patternsBrief.expandedOverview.summary}</p>
+                            </div>
+                          ) : null}
+
+                          <div className="pattern-brief-expanded-sections">
+                            {patternsBrief.expandedOverview.sections.map((section) => (
+                              <section className="pattern-brief-expanded-section" key={section.title}>
+                                <p className="subtle-label">{section.title}</p>
+                                <ul className="pattern-brief-list compact">
+                                  {section.lines.map((line) => (
+                                    <li key={line}>{line}</li>
+                                  ))}
+                                </ul>
+                              </section>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {briefPrompt ? (
+                        <div className="pattern-brief-prompts">
+                          <p className="subtle-label">Worth asking</p>
+                          <button
+                            className="option-chip option-chip-inline"
+                            onClick={() => openPattern(briefPrompt.patternId, briefPrompt.text)}
+                            type="button"
+                          >
+                            <Sparkles size={14} />
+                            {briefPrompt.text}
+                          </button>
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : (
+                    <section className="pattern-brief-launcher">
+                      <div className="pattern-brief-header">
+                        <p className="subtle-label">Update</p>
+                        <p className="pattern-brief-launcher-copy">
+                          Generate a current read on what feels steady, what has sharpened lately, and what may matter next.
+                        </p>
                       </div>
-                    ) : null}
-                  </section>
+                      <button
+                        className="ghost-button"
+                        disabled={briefBusy}
+                        onClick={() => void handleGenerateBrief()}
+                        type="button"
+                      >
+                        {briefBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                        {briefBusy ? 'Generating update...' : 'Generate update'}
+                      </button>
+                    </section>
+                  )
                 ) : null}
 
                 {patternGroups.map((group) => (

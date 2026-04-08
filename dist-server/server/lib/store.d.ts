@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { AnalysisPayload, ConversationMessageRecord, EntryListRecord, HighlightRecord, JournalEntry, JournalBootstrapRecord, JournalView, PatternSection } from '../types.js';
 type CreateEntryInput = {
+    createdAt?: string;
     rawText: string;
     source: JournalEntry['source'];
     title: string;

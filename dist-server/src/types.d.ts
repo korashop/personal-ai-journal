@@ -153,6 +153,7 @@ export type CreateEntryPayload = {
     userId?: string;
     photos?: File[];
     transcribedText?: string;
+    createdAt?: string;
 };
 export type PhotoTranscriptionPayload = {
     transcript: string;

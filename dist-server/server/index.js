@@ -42,6 +42,7 @@ const createEntrySchema = z.object({
     rawText: z.string().default(''),
     source: z.enum(['typed', 'paste', 'photo']),
     transcribedText: z.string().optional(),
+    createdAt: z.string().datetime().optional(),
     userId: z.string().optional(),
 });
 const createConversationSchema = z.object({
@@ -279,6 +280,7 @@ app.post('/api/entries', upload.array('photos', 12), async (request, response, n
             relevantHighlights: bootstrap.highlights.slice(0, 3),
         });
         const entry = await store.createEntry({
+            createdAt: parsed.createdAt,
             rawText,
             source: files.length ? 'photo' : parsed.source,
             title: analysis.title || buildEntryTitle(analysisInput, tags),

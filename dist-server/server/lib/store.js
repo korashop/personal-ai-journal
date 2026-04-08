@@ -163,7 +163,7 @@ class DemoStore {
     async createEntry(input) {
         const entry = attachEntryThreadsToEntry({
             id: randomUUID(),
-            createdAt: new Date().toISOString(),
+            createdAt: input.createdAt ?? new Date().toISOString(),
             rawText: input.rawText,
             source: input.source,
             title: input.title,
@@ -396,7 +396,7 @@ class SupabaseStore {
     }
     async createEntry(input) {
         const id = randomUUID();
-        const createdAt = new Date().toISOString();
+        const createdAt = input.createdAt ?? new Date().toISOString();
         const preparedEntry = attachEntryThreadsToEntry({
             id,
             userId: input.userId,

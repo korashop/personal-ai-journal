@@ -67,6 +67,9 @@ export async function createEntry(payload: CreateEntryPayload): Promise<EntryRec
   if (payload.transcribedText) {
     formData.append('transcribedText', payload.transcribedText)
   }
+  if (payload.createdAt) {
+    formData.append('createdAt', payload.createdAt)
+  }
 
   if (payload.userId) {
     formData.append('userId', payload.userId)

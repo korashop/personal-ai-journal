@@ -97,12 +97,32 @@ export default function App() {
     source: 'typed' | 'paste' | 'photo'
     photos: File[]
     transcribedText?: string
+    splitEntries?: Array<{
+      rawText: string
+      createdAt?: string
+    }>
   }) {
     try {
       setBusy(true)
       setError(null)
-      const entry = await createEntry(payload)
-      await loadBootstrap(entry.id)
+      if (payload.splitEntries?.length) {
+        let lastEntryId: string | null = null
+
+        for (const splitEntry of payload.splitEntries) {
+          const created = await createEntry({
+            rawText: splitEntry.rawText,
+            source: payload.source,
+            photos: [],
+            createdAt: splitEntry.createdAt,
+          })
+          lastEntryId = created.id
+        }
+
+        await loadBootstrap(lastEntryId)
+      } else {
+        const entry = await createEntry(payload)
+        await loadBootstrap(entry.id)
+      }
       setView('entries')
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not submit entry')
@@ -255,6 +275,9 @@ export default function App() {
               entries={entries}
               memoryDoc={bootstrap.memoryDoc}
               patternsBrief={bootstrap.patternsBrief}
+              onGenerateBrief={async () => {
+                await loadBootstrap(null, { preserveSelection: true })
+              }}
               onOpenEntry={(entryId) => {
                 setError(null)
                 setSelectedEntryId(entryId)

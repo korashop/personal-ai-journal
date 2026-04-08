@@ -1,13 +1,110 @@
 import { ChevronLeft, ChevronRight, FileText, ImagePlus, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { DragEvent, FormEvent } from 'react'
 
 import { transcribePhotos } from '../lib/api'
 import type { EntrySource } from '../types'
 
+type SplitCandidate = {
+  id: string
+  label: string
+  createdAt?: string
+  rawText: string
+  preview: string
+}
+
+const DATE_HEADING_PATTERNS = [
+  /^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*,?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{2,4})?$/i,
+  /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{2,4})?$/i,
+  /^(?:\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}[/-]\d{1,2}[/-]\d{1,2})$/,
+]
+
+function cleanSplitText(text: string) {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function clipSplitPreview(text: string, maxLength = 150) {
+  const cleaned = cleanSplitText(text)
+  if (cleaned.length <= maxLength) return cleaned
+  const clipped = cleaned.slice(0, maxLength)
+  const boundary = clipped.lastIndexOf(' ')
+  return `${(boundary > 70 ? clipped.slice(0, boundary) : clipped).trim()}...`
+}
+
+function detectDateHeading(line: string) {
+  const cleaned = line.trim().replace(/^[-*•]\s*/, '').replace(/\s+/g, ' ')
+  if (!cleaned) return null
+  if (!DATE_HEADING_PATTERNS.some((pattern) => pattern.test(cleaned))) return null
+
+  const normalized = cleaned
+    .replace(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*,?\s+/i, '')
+    .replace(/(\d{1,2})(st|nd|rd|th)\b/gi, '$1')
+
+  const numericMatch = normalized.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/)
+  if (numericMatch) {
+    const [, month, day, yearValue] = numericMatch
+    const year = yearValue ? Number(yearValue.length === 2 ? `20${yearValue}` : yearValue) : new Date().getFullYear()
+    const parsed = new Date(Date.UTC(year, Number(month) - 1, Number(day)))
+    if (Number.isNaN(parsed.getTime())) {
+      return { label: cleaned }
+    }
+    return {
+      label: cleaned,
+      createdAt: parsed.toISOString(),
+    }
+  }
+
+  const parsed = new Date(normalized)
+  if (Number.isNaN(parsed.getTime())) {
+    return { label: cleaned }
+  }
+
+  return {
+    label: cleaned,
+    createdAt: new Date(Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())).toISOString(),
+  }
+}
+
+function detectSplitCandidates(text: string): SplitCandidate[] {
+  const lines = text
+    .split('\n')
+    .map((line) => line.replace(/\s+$/g, ''))
+
+  const boundaries = lines
+    .map((line, index) => ({ index, heading: detectDateHeading(line) }))
+    .filter((item) => item.heading)
+
+  if (boundaries.length < 2) return []
+
+  return boundaries
+    .map((item, index) => {
+      const start = item.index
+      const end = boundaries[index + 1]?.index ?? lines.length
+      const sectionLines = lines.slice(start, end).join('\n').trim()
+      const bodyPreview = lines.slice(start + 1, end).join(' ').trim()
+      return {
+        id: `${index}-${item.heading?.label ?? 'entry'}`,
+        label: item.heading?.label ?? `Entry ${index + 1}`,
+        createdAt: item.heading?.createdAt,
+        rawText: sectionLines,
+        preview: clipSplitPreview(bodyPreview || sectionLines),
+      }
+    })
+    .filter((candidate) => cleanSplitText(candidate.rawText))
+}
+
 type EntryComposerProps = {
   busy: boolean
-  onSubmit: (payload: { rawText: string; source: EntrySource; photos: File[]; transcribedText?: string }) => Promise<void>
+  onSubmit: (payload: {
+    rawText: string
+    source: EntrySource
+    photos: File[]
+    transcribedText?: string
+    splitEntries?: Array<{
+      rawText: string
+      createdAt?: string
+    }>
+  }) => Promise<void>
 }
 
 export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
@@ -21,6 +118,12 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewMeta, setReviewMeta] = useState<{ imageCount: number; failedCount: number } | null>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [submitAsSplitEntries, setSubmitAsSplitEntries] = useState(false)
+
+  const splitCandidates = useMemo(
+    () => (reviewReady && !rawText.trim() ? detectSplitCandidates(transcribedText) : []),
+    [rawText, reviewReady, transcribedText],
+  )
 
   function appendPhotos(nextFiles: File[]) {
     setPhotos((current) => {
@@ -41,6 +144,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
     setTranscribedText('')
     setReviewError(null)
     setReviewMeta(null)
+    setSubmitAsSplitEntries(false)
   }
 
   function movePhoto(index: number, direction: -1 | 1) {
@@ -55,6 +159,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
     setTranscribedText('')
     setReviewError(null)
     setReviewMeta(null)
+    setSubmitAsSplitEntries(false)
   }
 
   function removePhoto(target: File) {
@@ -65,6 +170,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
     setTranscribedText('')
     setReviewError(null)
     setReviewMeta(null)
+    setSubmitAsSplitEntries(false)
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -78,6 +184,12 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
       source,
       photos,
       transcribedText: reviewReady ? transcribedText.trim() : undefined,
+      splitEntries: submitAsSplitEntries && splitCandidates.length
+        ? splitCandidates.map((candidate) => ({
+            rawText: candidate.rawText,
+            createdAt: candidate.createdAt,
+          }))
+        : undefined,
     })
 
     setRawText('')
@@ -87,6 +199,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
     setReviewReady(false)
     setReviewError(null)
     setReviewMeta(null)
+    setSubmitAsSplitEntries(false)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -111,6 +224,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
       setTranscribedText(result.transcript)
       setReviewMeta({ imageCount: result.imageCount, failedCount: result.failedCount })
       setReviewReady(result.anySucceeded)
+      setSubmitAsSplitEntries(false)
 
       if (!result.anySucceeded) {
         setReviewError('The app could not read those images well enough yet. Try adding a bit of typed context, or use clearer JPG/PNG photos.')
@@ -286,6 +400,47 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
                 rows={12}
                 value={transcribedText}
               />
+
+              {splitCandidates.length ? (
+                <div className="split-review">
+                  <div className="split-review-header">
+                    <div>
+                      <p className="subtle-label">Possible entry splits</p>
+                      <p className="hint">
+                        I found {splitCandidates.length} dated sections in this reviewed text. You can keep one combined entry or submit them separately.
+                      </p>
+                    </div>
+                    <div className="split-review-actions">
+                      <button
+                        className={`ghost-button ${!submitAsSplitEntries ? 'selected' : ''}`}
+                        onClick={() => setSubmitAsSplitEntries(false)}
+                        type="button"
+                      >
+                        Keep one entry
+                      </button>
+                      <button
+                        className={`ghost-button ${submitAsSplitEntries ? 'selected' : ''}`}
+                        onClick={() => setSubmitAsSplitEntries(true)}
+                        type="button"
+                      >
+                        Submit as {splitCandidates.length} entries
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="split-preview-list">
+                    {splitCandidates.map((candidate, index) => (
+                      <section className="split-preview-card" key={candidate.id}>
+                        <div className="split-preview-header">
+                          <strong>{candidate.label}</strong>
+                          <span className="hint">Entry {index + 1}</span>
+                        </div>
+                        <p>{candidate.preview}</p>
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -296,7 +451,7 @@ export function EntryComposer({ busy, onSubmit }: EntryComposerProps) {
           type="submit"
         >
           {busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-          {busy ? 'Thinking...' : photos.length ? 'Submit reviewed entry' : 'Submit entry'}
+          {busy ? 'Thinking...' : submitAsSplitEntries && splitCandidates.length ? `Submit ${splitCandidates.length} entries` : photos.length ? 'Submit reviewed entry' : 'Submit entry'}
         </button>
       </div>
     </form>

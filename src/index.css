@@ -368,6 +368,65 @@ button {
   align-items: flex-start;
 }
 
+.split-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.split-review-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.split-review-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ghost-button.selected {
+  border-color: rgba(142, 184, 199, 0.3);
+  background: rgba(142, 184, 199, 0.08);
+  color: var(--text);
+}
+
+.split-preview-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.split-preview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.split-preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.split-preview-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .compact-icon {
   padding: 9px 11px;
 }
@@ -1140,10 +1199,35 @@ button {
   gap: 12px;
 }
 
+.pattern-brief-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .pattern-brief-header {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.pattern-brief-launcher {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.pattern-brief-launcher-copy {
+  margin: 0;
+  max-width: 64ch;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .pattern-brief-section,
@@ -1662,7 +1746,10 @@ button {
 
   .photo-upload-header,
   .photo-review-actions,
-  .transcription-review-header {
+  .transcription-review-header,
+  .split-review-header,
+  .pattern-brief-topbar,
+  .pattern-brief-launcher {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1673,6 +1760,10 @@ button {
 
   .photo-page-actions {
     align-self: flex-end;
+  }
+
+  .pattern-brief-actions {
+    justify-content: flex-start;
   }
 
   .pattern-chat .primary-button {

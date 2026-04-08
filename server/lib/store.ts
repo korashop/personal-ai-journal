@@ -44,6 +44,7 @@ type SupabaseEntryRow = {
 }
 
 type CreateEntryInput = {
+  createdAt?: string
   rawText: string
   source: JournalEntry['source']
   title: string
@@ -277,7 +278,7 @@ class DemoStore {
   async createEntry(input: CreateEntryInput) {
     const entry: JournalEntry = attachEntryThreadsToEntry({
       id: randomUUID(),
-      createdAt: new Date().toISOString(),
+      createdAt: input.createdAt ?? new Date().toISOString(),
       rawText: input.rawText,
       source: input.source,
       title: input.title,
@@ -532,7 +533,7 @@ class SupabaseStore {
 
   async createEntry(input: CreateEntryInput) {
     const id = randomUUID()
-    const createdAt = new Date().toISOString()
+    const createdAt = input.createdAt ?? new Date().toISOString()
     const preparedEntry = attachEntryThreadsToEntry({
       id,
       userId: input.userId,
