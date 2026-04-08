@@ -4,12 +4,17 @@ export type AnalysisSection = {
     title: string;
     content: string;
 };
+export type ThreadSnippet = {
+    text: string;
+    sourceType: 'raw_quote' | 'analysis_quote' | 'summary_fallback';
+    sectionTitle?: string;
+};
 export type EntryThread = {
     entryId: string;
     entryTitle: string;
     label: string;
     claim: string;
-    snippets: string[];
+    snippets: ThreadSnippet[];
     whyItMatters: string;
     confidence: number;
     salience: number;
@@ -95,6 +100,8 @@ export type PatternSection = {
         entryId: string;
         entryTitle: string;
         snippet: string;
+        sourceType?: 'raw_quote' | 'analysis_quote' | 'summary_fallback';
+        sectionTitle?: string;
         threadLabel?: string;
         claim?: string;
         whyItMatters?: string;

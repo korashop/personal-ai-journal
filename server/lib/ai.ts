@@ -11,6 +11,7 @@ import type {
   MemoryDocumentRecord,
   PatternSection,
   ResurfacingCard,
+  ThreadSnippet,
 } from '../types.js'
 
 type Context = {
@@ -944,6 +945,24 @@ function dedupePatternLines(lines: string[], seedText = '') {
   return kept
 }
 
+function textOverlapScore(left: string, right: string) {
+  const normalize = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const leftTokens = new Set(normalize(left).split(' ').filter((token) => token.length > 3))
+  const rightTokens = new Set(normalize(right).split(' ').filter((token) => token.length > 3))
+  if (!leftTokens.size || !rightTokens.size) return 0
+  let shared = 0
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) shared += 1
+  }
+  return shared / Math.max(leftTokens.size, rightTokens.size)
+}
+
 function dedupeAndRefinePatterns(patterns: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>>) {
   const merged: Array<Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>> = []
 
@@ -992,6 +1011,8 @@ type LocalThemeCandidate = {
   entryId: string
   entryTitle: string
   evidence: string
+  sourceType: 'raw_quote' | 'analysis_quote' | 'summary_fallback'
+  sectionTitle?: string
   claim: string
   whyItMatters: string
   createdAt: string
@@ -1011,6 +1032,8 @@ type PatternClusterDraft = {
     entryId: string
     entryTitle: string
     evidence: string
+    sourceType: 'raw_quote' | 'analysis_quote' | 'summary_fallback'
+    sectionTitle?: string
     claim: string
     whyItMatters: string
     weight: number
@@ -1280,6 +1303,99 @@ function sourceLinesForPatternEvidence(entry: JournalEntry) {
     .filter((line) => line && !evidenceLooksFragmentary(line))
 }
 
+function rawQuoteCandidatesForEntry(entry: JournalEntry): ThreadSnippet[] {
+  return dedupePatternLines(
+    splitIntoCandidateSentences(entry.rawText)
+      .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
+      .filter((line) => line && !evidenceLooksFragmentary(line)),
+  ).map((text) => ({
+    text,
+    sourceType: 'raw_quote' as const,
+  }))
+}
+
+function analysisQuoteCandidatesForEntry(entry: JournalEntry): ThreadSnippet[] {
+  const candidates = (entry.analysis?.sections ?? [])
+    .filter((section) => !isGenericSectionTitle(section.title))
+    .flatMap((section) =>
+      splitIntoCandidateSentences(section.content)
+        .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
+        .filter((line) => line && !evidenceLooksFragmentary(line))
+        .map((text) => ({
+          text,
+          sourceType: 'analysis_quote' as const,
+          sectionTitle: section.title,
+        })),
+    )
+
+  const seen = new Set<string>()
+  return candidates.filter((item) => {
+    const key = normalizePatternTitle(item.text)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function scoreThreadSnippetCandidate(
+  snippet: ThreadSnippet,
+  label: string,
+  claim: string,
+  family: ThemeFamily | null,
+  preferredSectionTitle?: string,
+) {
+  const text = snippet.text
+  if (!text || evidenceLooksFragmentary(text)) return -1
+
+  let score = 0
+  if (snippet.sourceType === 'raw_quote') score += 7
+  if (snippet.sourceType === 'analysis_quote') score += 3
+  if (snippet.sourceType === 'summary_fallback') score -= 2
+  if (family?.test.test(text)) score += 4
+  score += semanticSimilarity(`${label} ${claim}`, text) * 8
+  if (preferredSectionTitle && snippet.sectionTitle === preferredSectionTitle) score += 2
+  if (/[.!?]$/.test(text)) score += 1
+  if (text.split(' ').filter(Boolean).length >= 8) score += 1
+  return score
+}
+
+function selectThreadSnippets(
+  entry: JournalEntry,
+  label: string,
+  claim: string,
+  preferredSectionTitle?: string,
+): ThreadSnippet[] {
+  const family = themeFamilyForText(`${label} ${claim}`)
+  const ranked = [...rawQuoteCandidatesForEntry(entry), ...analysisQuoteCandidatesForEntry(entry)]
+    .map((snippet) => ({
+      snippet,
+      score: scoreThreadSnippetCandidate(snippet, label, claim, family, preferredSectionTitle),
+    }))
+    .filter((item) => item.score >= 2)
+    .sort((left, right) => right.score - left.score)
+
+  const selected: ThreadSnippet[] = []
+  for (const { snippet } of ranked) {
+    if (selected.some((existing) => textOverlapScore(existing.text, snippet.text) > 0.58)) continue
+    selected.push(snippet)
+    if (selected.length >= 2 && selected.some((item) => item.sourceType === 'raw_quote')) {
+      break
+    }
+  }
+
+  if (selected.length) {
+    return selected.slice(0, 2)
+  }
+
+  const fallback = cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(entry.summary)))
+  return fallback
+    ? [{
+        text: fallback,
+        sourceType: 'summary_fallback',
+      }]
+    : []
+}
+
 function selectPatternEvidenceSnippet(pattern: PatternSection, entry: JournalEntry) {
   const sourceLines = sourceLinesForPatternEvidence(entry)
   const family = themeFamilyForText(pattern.title)
@@ -1291,6 +1407,61 @@ function selectPatternEvidenceSnippet(pattern: PatternSection, entry: JournalEnt
   ])
 
   return cleanTruncatedEnding(familyEvidence || openEvidence || entry.summary || '')
+}
+
+function scoreThreadMatchToPattern(pattern: PatternSection, thread: EntryThread) {
+  const titleScore = Math.max(
+    themeTitleSimilarity(pattern.title, thread.label),
+    semanticSimilarity(`${pattern.title} ${pattern.overview}`, `${thread.label} ${thread.claim}`),
+  )
+  const claimScore = semanticSimilarity(
+    `${pattern.overview} ${pattern.dimensions.join(' ')}`,
+    `${thread.claim} ${thread.whyItMatters}`,
+  )
+  return titleScore * 0.6 + claimScore * 0.4 + thread.salience * 0.1
+}
+
+function selectPatternEvidenceDetail(pattern: PatternSection, entry: JournalEntry) {
+  const matchingThread = buildEntryThreads(entry)
+    .map((thread) => ({ thread, score: scoreThreadMatchToPattern(pattern, thread) }))
+    .sort((left, right) => right.score - left.score)[0]
+
+  if (matchingThread && matchingThread.score >= 0.42) {
+    const snippet = matchingThread.thread.snippets[0]
+    if (snippet?.text && !evidenceLooksFragmentary(snippet.text)) {
+      return {
+        entryId: entry.id,
+        entryTitle: entry.title,
+        snippet: cleanTruncatedEnding(snippet.text),
+        sourceType: snippet.sourceType,
+        sectionTitle: snippet.sectionTitle,
+        threadLabel: matchingThread.thread.label,
+        claim: matchingThread.thread.claim,
+        whyItMatters: matchingThread.thread.whyItMatters,
+        confidence: matchingThread.thread.confidence,
+        salience: matchingThread.thread.salience,
+        tags: matchingThread.thread.tags,
+        createdAt: matchingThread.thread.createdAt,
+      }
+    }
+  }
+
+  const snippet = selectPatternEvidenceSnippet(pattern, entry)
+  if (!snippet || evidenceLooksFragmentary(snippet)) return null
+
+  return {
+    entryId: entry.id,
+    entryTitle: entry.title,
+    snippet,
+    sourceType: 'summary_fallback' as const,
+    threadLabel: pattern.title,
+    claim: pattern.dimensions[0] ?? pattern.overview,
+    whyItMatters: pattern.overview,
+    confidence: 0.5,
+    salience: 0.5,
+    tags: entry.tags,
+    createdAt: entry.createdAt,
+  }
 }
 
 function buildThreadWhyItMatters(label: string, claim: string, familyKey?: string) {
@@ -1371,7 +1542,7 @@ function normalizeEntryThreadCandidate(
   candidate: {
     label: string
     claim: string
-    snippets: string[]
+    snippets: ThreadSnippet[]
     whyItMatters: string
     confidence: number
     salience: number
@@ -1381,12 +1552,17 @@ function normalizeEntryThreadCandidate(
 ): EntryThread | null {
   const label = simplifyPatternTitle(candidate.label)
   const claim = cleanTruncatedEnding(candidate.claim)
-  const snippets = dedupePatternLines(
-    candidate.snippets
-      .map((item) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(item))))
-      .filter((item) => item && !evidenceLooksFragmentary(item)),
-    claim,
-  ).slice(0, 3)
+  const snippets = candidate.snippets
+    .map((item) => ({
+      text: cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(item.text))),
+      sourceType: item.sourceType,
+      sectionTitle: item.sectionTitle ? cleanTruncatedEnding(item.sectionTitle) : undefined,
+    }))
+    .filter((item) => item.text && !evidenceLooksFragmentary(item.text))
+    .filter((item, index, items) =>
+      items.findIndex((other) => normalizePatternTitle(other.text) === normalizePatternTitle(item.text)) === index,
+    )
+    .slice(0, 3)
   const whyItMatters = cleanTruncatedEnding(candidate.whyItMatters)
 
   if (!label || !claim || !snippets.length) return null
@@ -1415,7 +1591,10 @@ function dedupeEntryThreads(threads: EntryThread[]) {
         themeTitleSimilarity(existing.label, thread.label) >= 0.8 ||
         semanticSimilarity(existing.label, thread.label) >= 0.82
       const sameClaim =
-        semanticSimilarity(`${existing.claim} ${existing.snippets[0] ?? ''}`, `${thread.claim} ${thread.snippets[0] ?? ''}`) >= 0.8
+        semanticSimilarity(
+          `${existing.claim} ${existing.snippets[0]?.text ?? ''}`,
+          `${thread.claim} ${thread.snippets[0]?.text ?? ''}`,
+        ) >= 0.8
       return sameLabel || (relatedLabel && sameClaim)
     })
 
@@ -1424,35 +1603,23 @@ function dedupeEntryThreads(threads: EntryThread[]) {
       continue
     }
 
-    if ((thread.snippets[0]?.length ?? 0) > (duplicate.snippets[0]?.length ?? 0)) {
-      duplicate.snippets = dedupePatternLines([...thread.snippets, ...duplicate.snippets], duplicate.claim).slice(0, 3)
-    }
+    const combinedSnippets = [...thread.snippets, ...duplicate.snippets]
+    duplicate.snippets = combinedSnippets
+      .filter((item, index, items) =>
+        items.findIndex((other) => normalizePatternTitle(other.text) === normalizePatternTitle(item.text)) === index,
+      )
+      .sort((left, right) => {
+        const sourcePriority = (item: ThreadSnippet) =>
+          item.sourceType === 'raw_quote' ? 3 : item.sourceType === 'analysis_quote' ? 2 : 1
+        return sourcePriority(right) - sourcePriority(left)
+      })
+      .slice(0, 3)
     duplicate.confidence = clampScore(Math.max(duplicate.confidence, thread.confidence))
     duplicate.salience = clampScore(Math.max(duplicate.salience, thread.salience))
     duplicate.tags = [...new Set([...duplicate.tags, ...thread.tags])].slice(0, 6)
   }
 
   return kept.slice(0, 8)
-}
-
-function threadSnippetsFromSource(entry: JournalEntry, label: string, claim: string) {
-  const sourceLines = splitIntoCandidateSentences(entry.rawText)
-    .map((line) => cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(line))))
-    .filter((line) => line && !evidenceLooksFragmentary(line))
-  const family = themeFamilyForText(`${label} ${claim}`)
-  const familySnippet = family ? bestFamilyEvidenceLine(sourceLines, family) : ''
-  const semanticSnippet = bestOpenThemeEvidenceLine([
-    ...sourceLines,
-    claim,
-    entry.summary,
-  ])
-
-  return dedupePatternLines([
-    familySnippet,
-    semanticSnippet,
-    firstSentence(claim, 180),
-    entry.summary,
-  ].filter(Boolean)).slice(0, 3)
 }
 
 export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
@@ -1463,7 +1630,7 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
         {
           label: thread.label,
           claim: thread.claim,
-          snippets: thread.snippets?.length ? thread.snippets : threadSnippetsFromSource(entry, thread.label, thread.claim),
+          snippets: thread.snippets?.length ? thread.snippets : selectThreadSnippets(entry, thread.label, thread.claim),
           whyItMatters: thread.whyItMatters,
           confidence: thread.confidence,
           salience: thread.salience,
@@ -1481,7 +1648,7 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
   const threadCandidates = new Map<string, {
     label: string
     claim: string
-    snippets: string[]
+    snippets: ThreadSnippet[]
     whyItMatters: string
     confidence: number
     salience: number
@@ -1503,7 +1670,7 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
     threadCandidates.set(normalizePatternTitle(label), {
       label,
       claim,
-      snippets: threadSnippetsFromSource(entry, label, claim),
+      snippets: selectThreadSnippets(entry, label, claim),
       whyItMatters: buildThreadWhyItMatters(label, claim, family.key),
       confidence,
       salience,
@@ -1525,8 +1692,8 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
           ...splitIntoCandidateSentences(section.content),
           entry.summary,
         ])
-    const snippets = threadSnippetsFromSource(entry, label, section.content || snippetSource)
-    const claim = buildThreadClaim(label, snippetSource || snippets[0] || section.content, entry.summary, section.content)
+    const snippets = selectThreadSnippets(entry, label, section.content || snippetSource, section.title)
+    const claim = buildThreadClaim(label, snippetSource || snippets[0]?.text || section.content, entry.summary, section.content)
     if (!snippets.length || !claim) continue
 
     const key = normalizePatternTitle(label)
@@ -1556,7 +1723,7 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
     if (!family && uncategorizedThemeTitleLooksTooGeneric(label)) continue
     const normalizedLabel = family?.title ?? label
     const claim = buildThreadClaim(normalizedLabel, entry.summary, entry.summary)
-    const snippets = threadSnippetsFromSource(entry, normalizedLabel, claim)
+    const snippets = selectThreadSnippets(entry, normalizedLabel, claim)
     if (!snippets.length) continue
 
     const key = normalizePatternTitle(normalizedLabel)
@@ -1567,7 +1734,7 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
         snippets,
         whyItMatters: buildThreadWhyItMatters(normalizedLabel, claim, family?.key),
         confidence: family ? 0.72 : 0.6,
-        salience: 0.54 + Math.min(scoreThemeCharge(`${claim} ${snippets[0] ?? ''}`), 5) * 0.04,
+        salience: 0.54 + Math.min(scoreThemeCharge(`${claim} ${snippets[0]?.text ?? ''}`), 5) * 0.04,
         tags: [label, ...(family ? [family.title] : []), ...entry.tags],
       })
     }
@@ -1577,7 +1744,7 @@ export function buildEntryThreads(entry: JournalEntry): EntryThread[] {
     threadCandidates.set(normalizePatternTitle(entry.title || entry.summary), {
       label: simplifyPatternTitle(entry.title || entry.summary || 'Journal thread'),
       claim: buildThreadClaim(entry.title || 'Journal thread', entry.summary, entry.summary),
-      snippets: threadSnippetsFromSource(entry, entry.title || 'Journal thread', entry.summary),
+      snippets: selectThreadSnippets(entry, entry.title || 'Journal thread', entry.summary),
       whyItMatters: `This matters because the entry’s main signal appears to be ${entry.summary.charAt(0).toLowerCase()}${entry.summary.slice(1)}`,
       confidence: 0.52,
       salience: 0.5,
@@ -2073,7 +2240,7 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
   const themeSummary = dedupePatternLines([
     pattern.supportingEvidence?.[0]?.claim ?? '',
     pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
-    rankRationale,
+    pattern.supportingEvidence?.[1]?.claim ?? '',
   ].filter(Boolean), pattern.overview).slice(0, 3)
 
   return {
@@ -2141,7 +2308,7 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
     const uncategorized: EntryThread[] = []
 
     for (const thread of entryThreads) {
-      const family = themeFamilyForText(`${thread.label} ${thread.claim} ${thread.snippets.join(' ')}`)
+      const family = themeFamilyForText(`${thread.label} ${thread.claim} ${thread.snippets.map((item) => item.text).join(' ')}`)
       if (!family) {
         uncategorized.push(thread)
         continue
@@ -2164,7 +2331,8 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
     )
 
     for (const thread of [...familyBuckets.values(), ...distinctUncategorized.slice(0, 5)]) {
-      const evidence = thread.snippets[0] ?? thread.claim
+      const evidenceSnippet = thread.snippets[0]
+      const evidence = evidenceSnippet?.text ?? thread.claim
       if (!thread.label || !evidence || evidenceLooksFragmentary(evidence)) continue
       if (!themeCandidateIsSelfConsistent(thread.label, evidence)) continue
 
@@ -2174,6 +2342,8 @@ function buildLocalThemeCandidates(entries: JournalEntry[]) {
         entryId: thread.entryId,
         entryTitle: thread.entryTitle,
         evidence,
+        sourceType: evidenceSnippet?.sourceType ?? 'summary_fallback',
+        sectionTitle: evidenceSnippet?.sectionTitle,
         claim: thread.claim,
         whyItMatters: thread.whyItMatters,
         createdAt: thread.createdAt,
@@ -2199,6 +2369,8 @@ function buildPatternClusters(entries: JournalEntry[]) {
     evidenceByEntry: Map<string, Array<{
       entryTitle: string
       evidence: string
+      sourceType: 'raw_quote' | 'analysis_quote' | 'summary_fallback'
+      sectionTitle?: string
       claim: string
       whyItMatters: string
       weight: number
@@ -2233,6 +2405,8 @@ function buildPatternClusters(entries: JournalEntry[]) {
         evidenceByEntry: new Map([[candidate.entryId, [{
           entryTitle: candidate.entryTitle,
           evidence: candidate.evidence,
+          sourceType: candidate.sourceType,
+          sectionTitle: candidate.sectionTitle,
           claim: candidate.claim,
           whyItMatters: candidate.whyItMatters,
           weight: candidate.weight,
@@ -2258,6 +2432,8 @@ function buildPatternClusters(entries: JournalEntry[]) {
       entryEvidence.push({
         entryTitle: candidate.entryTitle,
         evidence: candidate.evidence,
+        sourceType: candidate.sourceType,
+        sectionTitle: candidate.sectionTitle,
         claim: candidate.claim,
         whyItMatters: candidate.whyItMatters,
         weight: candidate.weight,
@@ -2304,6 +2480,8 @@ function buildPatternClusters(entries: JournalEntry[]) {
               entryId,
               entryTitle: item.entryTitle || 'Untitled entry',
               evidence,
+              sourceType: item.sourceType,
+              sectionTitle: item.sectionTitle,
               claim: cleanTruncatedEnding(item.claim),
               whyItMatters: cleanTruncatedEnding(item.whyItMatters),
               weight: item.weight,
@@ -2353,6 +2531,8 @@ function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
         entryId: item.entryId,
         entryTitle: item.entryTitle,
         snippet: cleanTruncatedEnding(item.evidence),
+        sourceType: item.sourceType,
+        sectionTitle: item.sectionTitle,
         threadLabel: cluster.title,
         claim: cleanTruncatedEnding(item.claim),
         whyItMatters: cleanTruncatedEnding(item.whyItMatters),
@@ -2669,6 +2849,8 @@ ${clusters
           entryId: item.entryId,
           entryTitle: item.entryTitle,
           snippet: cleanTruncatedEnding(item.evidence),
+          sourceType: item.sourceType,
+          sectionTitle: item.sectionTitle,
           threadLabel: cluster.title,
           claim: cleanTruncatedEnding(item.claim),
           whyItMatters: cleanTruncatedEnding(item.whyItMatters),
@@ -2781,6 +2963,8 @@ export function attachPatternSupportingEvidence(
         entryId: item.entryId,
         entryTitle: simplifyPatternTitle(item.entryTitle),
         snippet: cleanTruncatedEnding(normalizeWhitespace(stripMarkdown(item.snippet))),
+        sourceType: item.sourceType,
+        sectionTitle: item.sectionTitle ? cleanTruncatedEnding(item.sectionTitle) : undefined,
         threadLabel: item.threadLabel ? simplifyPatternTitle(item.threadLabel) : pattern.title,
         claim: item.claim ? cleanTruncatedEnding(item.claim) : pattern.dimensions[0] ?? pattern.overview,
         whyItMatters: item.whyItMatters ? cleanTruncatedEnding(item.whyItMatters) : pattern.overview,
@@ -2801,20 +2985,8 @@ export function attachPatternSupportingEvidence(
     const derivedEvidence = pattern.entryIds.flatMap((entryId) => {
       const entry = entryMap.get(entryId)
       if (!entry) return []
-      const snippet = selectPatternEvidenceSnippet(pattern, entry)
-      if (!snippet || evidenceLooksFragmentary(snippet)) return []
-      return [{
-        entryId: entry.id,
-        entryTitle: entry.title,
-        snippet,
-        threadLabel: pattern.title,
-        claim: pattern.dimensions[0] ?? pattern.overview,
-        whyItMatters: pattern.overview,
-        confidence: 0.58,
-        salience: 0.58,
-        tags: entry.tags,
-        createdAt: entry.createdAt,
-      }]
+      const detail = selectPatternEvidenceDetail(pattern, entry)
+      return detail ? [detail] : []
     })
 
     const dedupedSnippets = dedupePatternLines(

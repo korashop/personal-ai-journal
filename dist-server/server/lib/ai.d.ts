@@ -37,6 +37,8 @@ export declare function buildPatternDebugReport(entries: JournalEntry[]): {
         entryId: string;
         entryTitle: string;
         evidence: string;
+        sourceType: "raw_quote" | "analysis_quote" | "summary_fallback";
+        sectionTitle?: string;
         claim: string;
         whyItMatters: string;
         weight: number;
@@ -55,6 +57,8 @@ export declare function buildPatternDebugReport(entries: JournalEntry[]): {
             entryId: string;
             entryTitle: string;
             snippet: string;
+            sourceType: "raw_quote" | "analysis_quote" | "summary_fallback";
+            sectionTitle: string;
             threadLabel: string;
             claim: string;
             whyItMatters: string;

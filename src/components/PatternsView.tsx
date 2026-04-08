@@ -23,9 +23,9 @@ function statusNote(pattern: PatternSection) {
 }
 
 function prominenceLabel(pattern: PatternSection) {
-  if (pattern.prominence === 'dominant') return `Dominant right now · score ${pattern.rankScore?.toFixed(1) ?? '—'}`
-  if (pattern.prominence === 'quiet' || pattern.entryCount <= 1) return `Quiet signal · score ${pattern.rankScore?.toFixed(1) ?? '—'}`
-  return `Active thread · score ${pattern.rankScore?.toFixed(1) ?? '—'}`
+  if (pattern.prominence === 'dominant') return 'Dominant right now'
+  if (pattern.prominence === 'quiet' || pattern.entryCount <= 1) return 'Quiet signal'
+  return 'Active thread'
 }
 
 function patternLooksPlaceholder(pattern: PatternSection) {
@@ -45,6 +45,12 @@ function normalizeForComparison(text: string) {
 
 function cleanDisplayText(text: string) {
   return (text ?? '').replace(/\bkyli\b/gi, 'skills')
+}
+
+function sourceTypeLabel(sourceType?: 'raw_quote' | 'analysis_quote' | 'summary_fallback') {
+  if (sourceType === 'raw_quote') return 'Exact quote'
+  if (sourceType === 'analysis_quote') return 'Analysis quote'
+  return 'Fallback summary'
 }
 
 function overlapScore(left: string, right: string) {
@@ -162,9 +168,11 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
         entryId: item.entryId,
         title: cleanDisplayText(item.entryTitle || entriesById.get(item.entryId)?.title || 'Untitled entry'),
         snippet: cleanDisplayText(item.snippet),
+        sourceType: item.sourceType,
+        sectionTitle: item.sectionTitle ? cleanDisplayText(item.sectionTitle) : undefined,
         threadLabel: cleanDisplayText(item.threadLabel || selectedPattern.title),
         claim: cleanDisplayText(item.claim || selectedPattern.overview),
-        whyItMatters: cleanDisplayText(item.whyItMatters || selectedPattern.rankRationale || ''),
+        whyItMatters: cleanDisplayText(item.whyItMatters || selectedPattern.overview),
         confidence: item.confidence,
         salience: item.salience,
         createdAt: item.createdAt,
@@ -178,9 +186,11 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
       entryId: entry.id,
       title: cleanDisplayText(entry.title),
       snippet: cleanDisplayText(entry.summary),
+      sourceType: 'summary_fallback' as const,
+      sectionTitle: undefined,
       threadLabel: cleanDisplayText(selectedPattern.title),
       claim: cleanDisplayText(selectedPattern.dimensions[0] || selectedPattern.overview),
-      whyItMatters: cleanDisplayText(selectedPattern.rankRationale || selectedPattern.overview),
+      whyItMatters: cleanDisplayText(selectedPattern.overview),
       confidence: undefined,
       salience: undefined,
       createdAt: undefined,
@@ -351,10 +361,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                           </div>
                           <p className="pattern-prominence-copy">{prominenceLabel(pattern)}</p>
                           <p className="pattern-home-preview">{cleanDisplayText(pattern.overview)}</p>
-                          <small>
-                            {pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}
-                            {pattern.rankFactors ? ` · recurrence ${pattern.rankFactors.recurrence}/10 · freshness ${pattern.rankFactors.freshness}/10` : ''}
-                          </small>
+                          <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                         </button>
                       )
                     })}
@@ -374,9 +381,6 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                 <div className="pattern-detail-meta">
                   <span className={`pattern-status ${selectedPattern.status}`}>{statusLabel(selectedPattern.status)}</span>
                   <span className="pattern-timestamp">{selectedPattern.entryCount} supporting entr{selectedPattern.entryCount === 1 ? 'y' : 'ies'}</span>
-                  {selectedPattern.rankScore != null ? (
-                    <span className="pattern-score-pill">Score {selectedPattern.rankScore.toFixed(1)}</span>
-                  ) : null}
                 </div>
                 <p className="pattern-status-note">{statusNote(selectedPattern)}</p>
               </div>
@@ -397,38 +401,10 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                 <div className="memory-doc">
                   <h2>{selectedPattern.title}</h2>
                   <p className="muted">
-                    This panel shows the exact per-entry threads that formed this theme, plus the rank logic behind why it is
-                    dominant, supporting, or quiet.
+                    This panel shows the concrete entry-thread evidence behind the theme. Exact raw-entry quotes are the strongest support;
+                    analysis quotes and fallback summaries are weaker.
                   </p>
                   <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
-
-                  {selectedPattern.rankFactors ? (
-                    <div className="pattern-rank-grid">
-                      <article className="pattern-rank-card">
-                        <span>Recurrence</span>
-                        <strong>{selectedPattern.rankFactors.recurrence}/10</strong>
-                      </article>
-                      <article className="pattern-rank-card">
-                        <span>Coherence</span>
-                        <strong>{selectedPattern.rankFactors.coherence}/10</strong>
-                      </article>
-                      <article className="pattern-rank-card">
-                        <span>Weight</span>
-                        <strong>{selectedPattern.rankFactors.weight}/10</strong>
-                      </article>
-                      <article className="pattern-rank-card">
-                        <span>Freshness</span>
-                        <strong>{selectedPattern.rankFactors.freshness}/10</strong>
-                      </article>
-                    </div>
-                  ) : null}
-
-                  {selectedPattern.rankRationale ? (
-                    <>
-                      <h3>Why it ranks here</h3>
-                      <p>{cleanDisplayText(selectedPattern.rankRationale)}</p>
-                    </>
-                  ) : null}
 
                   {supportingEvidenceRows.length ? (
                     <>
@@ -440,15 +416,13 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                               <strong>{item.title}</strong>
                               <span>{item.threadLabel}</span>
                             </div>
+                            <div className="pattern-evidence-meta">
+                              <span>{sourceTypeLabel(item.sourceType)}</span>
+                              {item.sectionTitle ? <span>{item.sectionTitle}</span> : null}
+                            </div>
                             <p>{item.claim}</p>
                             <blockquote>{item.snippet}</blockquote>
                             {item.whyItMatters ? <small>{item.whyItMatters}</small> : null}
-                            {item.confidence != null || item.salience != null ? (
-                              <div className="pattern-evidence-meta">
-                                {item.confidence != null ? <span>Confidence {Math.round(item.confidence * 100)}%</span> : null}
-                                {item.salience != null ? <span>Salience {Math.round(item.salience * 100)}%</span> : null}
-                              </div>
-                            ) : null}
                           </li>
                         ))}
                       </ul>
@@ -515,6 +489,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                         <strong>{entry.title}</strong>
                         <small className="related-thread-label">{entry.threadLabel}</small>
                         <span>{entry.snippet}</span>
+                        <small className="related-thread-label">{sourceTypeLabel(entry.sourceType)}</small>
                         {entry.feedLabels.length ? (
                           <div className="entry-bullets compact">
                             {entry.feedLabels.slice(0, 3).map((label) => (

@@ -96,6 +96,8 @@ const patternReplySchema = z.object({
         entryId: z.string(),
         entryTitle: z.string(),
         snippet: z.string(),
+        sourceType: z.enum(['raw_quote', 'analysis_quote', 'summary_fallback']).optional(),
+        sectionTitle: z.string().optional(),
         threadLabel: z.string().optional(),
         claim: z.string().optional(),
         whyItMatters: z.string().optional(),

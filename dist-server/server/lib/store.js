@@ -70,7 +70,13 @@ function parseLegacyAnalysis(value, rawText) {
                 entryTitle: thread.entryTitle ?? '',
                 label: thread.label,
                 claim: thread.claim,
-                snippets: thread.snippets,
+                snippets: thread.snippets
+                    .filter((snippet) => snippet?.text)
+                    .map((snippet) => ({
+                    text: snippet.text,
+                    sourceType: snippet.sourceType ?? 'summary_fallback',
+                    sectionTitle: snippet.sectionTitle,
+                })),
                 whyItMatters: thread.whyItMatters ?? thread.claim,
                 confidence: typeof thread.confidence === 'number' ? thread.confidence : 0.6,
                 salience: typeof thread.salience === 'number' ? thread.salience : 0.6,
