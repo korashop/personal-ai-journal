@@ -765,6 +765,8 @@ function dedupePatternLines(lines, seedText = '') {
         return shared / Math.max(leftTokens.size, rightTokens.size);
     };
     for (const line of lines) {
+        if (!normalizeWhitespace(line))
+            continue;
         if (seedText && overlap(line, seedText) > 0.5)
             continue;
         if (kept.some((existing) => overlap(existing, line) > 0.58))
@@ -2022,6 +2024,35 @@ function buildBriefPrompt(pattern) {
 function patternFamilyKey(pattern) {
     return themeFamilyForText(`${pattern.title} ${pattern.overview} ${(pattern.dimensions ?? []).join(' ')}`)?.key ?? null;
 }
+function patternRankFactor(pattern, key, fallback) {
+    return pattern.rankFactors?.[key] ?? fallback;
+}
+function scoreBriefDurability(pattern) {
+    return (patternRankFactor(pattern, 'recurrence', Math.min(10, pattern.entryCount * 2)) * 0.5 +
+        patternRankFactor(pattern, 'weight', 5) * 0.25 +
+        patternRankFactor(pattern, 'coherence', 5) * 0.25);
+}
+function scoreBriefRecency(pattern) {
+    return (patternRankFactor(pattern, 'freshness', scoreThemeFreshness(pattern)) * 0.55 +
+        patternRankFactor(pattern, 'weight', 5) * 0.2 +
+        patternRankFactor(pattern, 'recurrence', Math.min(10, pattern.entryCount * 2)) * 0.15 +
+        (pattern.status === 'deepening' ? 1 : pattern.status === 'active' ? 0.4 : 0));
+}
+function scoreBriefBridge(pattern) {
+    return (patternRankFactor(pattern, 'weight', 5) * 0.35 +
+        patternRankFactor(pattern, 'coherence', 5) * 0.25 +
+        patternRankFactor(pattern, 'recurrence', Math.min(10, pattern.entryCount * 2)) * 0.25 +
+        patternRankFactor(pattern, 'freshness', scoreThemeFreshness(pattern)) * 0.15);
+}
+function pickBriefPattern(patterns, scorer, excludeIds = [], avoidFamilyKeys = []) {
+    return [...patterns]
+        .filter((pattern) => !excludeIds.includes(pattern.id))
+        .sort((left, right) => scorer(right) - scorer(left))
+        .find((pattern) => {
+        const familyKey = patternFamilyKey(pattern);
+        return !familyKey || !avoidFamilyKeys.includes(familyKey);
+    }) ?? null;
+}
 function buildStateOfAffairsLine(pattern) {
     const familyKey = patternFamilyKey(pattern);
     if (familyKey === 'outward-proof') {
@@ -2059,6 +2090,26 @@ function buildStateOfAffairsLine(pattern) {
     }
     return clipAtWord(lowerCaseFirst(buildBriefWhyNow(pattern)), 150);
 }
+function buildRecentStateLine(pattern) {
+    const familyKey = patternFamilyKey(pattern);
+    const recentSignal = pattern.changeSummary?.[0] ?? buildBriefWhyNow(pattern);
+    if (familyKey === 'outward-proof') {
+        return 'Recent entries keep returning to the problem of borrowed conviction, where desire still feels easiest to trust after some outside signal appears';
+    }
+    if (familyKey === 'output-anchor') {
+        return 'Recently, the journal keeps tying output to whether time felt real, which makes shipping feel emotionally heavier than ordinary productivity';
+    }
+    if (familyKey === 'collaboration-threshold') {
+        return 'Recent movement points less toward solo effort and more toward the question of what kind of collaborator or structure would change what is possible';
+    }
+    if (familyKey === 'depth-craft') {
+        return 'Lately, the gap between broad motion and deeper craft seems especially alive, not just as an idea but as a felt dissatisfaction with shallower modes';
+    }
+    if (familyKey === 'certainty-delay') {
+        return 'Recent entries suggest the cost of waiting for certainty is becoming easier to see in real time, not only in retrospect';
+    }
+    return clipAtWord(recentSignal, 160);
+}
 function buildLifeLevelInteraction(patterns) {
     const lead = patterns[0];
     const second = patterns[1];
@@ -2093,10 +2144,14 @@ export function buildPatternsBrief(patterns) {
     if (!patterns.length)
         return null;
     const sorted = [...patterns].sort(compareThemePriority);
-    const focusPatterns = sorted.filter((pattern) => pattern.prominence !== 'quiet').slice(0, 3);
-    const sourcePatterns = focusPatterns.length ? focusPatterns : sorted.slice(0, 3);
-    if (!sourcePatterns.length)
+    const surfacedPatterns = sorted.filter((pattern) => pattern.prominence !== 'quiet');
+    const candidatePatterns = surfacedPatterns.length ? surfacedPatterns : sorted.slice(0, 5);
+    if (!candidatePatterns.length)
         return null;
+    const durablePattern = pickBriefPattern(candidatePatterns, scoreBriefDurability);
+    const recentPattern = pickBriefPattern(candidatePatterns, scoreBriefRecency, durablePattern ? [durablePattern.id] : [], durablePattern ? [patternFamilyKey(durablePattern) ?? ''] : []) ?? durablePattern;
+    const bridgePattern = pickBriefPattern(candidatePatterns, scoreBriefBridge, [durablePattern?.id, recentPattern?.id].filter((item) => Boolean(item)), [patternFamilyKey(durablePattern ?? candidatePatterns[0]) ?? '', patternFamilyKey(recentPattern ?? candidatePatterns[0]) ?? ''].filter(Boolean)) ?? pickBriefPattern(candidatePatterns, scoreBriefDurability, [durablePattern?.id, recentPattern?.id].filter((item) => Boolean(item)));
+    const sourcePatterns = [durablePattern, recentPattern, bridgePattern].filter((pattern) => Boolean(pattern));
     const prompts = sourcePatterns
         .map((pattern) => ({
         patternId: pattern.id,
@@ -2105,10 +2160,10 @@ export function buildPatternsBrief(patterns) {
         .filter((prompt, index, items) => items.findIndex((candidate) => normalizeWhitespace(candidate.text).toLowerCase() === normalizeWhitespace(prompt.text).toLowerCase()) === index)
         .slice(0, 1);
     const bullets = dedupePatternLines([
-        buildStateOfAffairsLine(sourcePatterns[0]),
-        buildStateOfAffairsLine(sourcePatterns[1] ?? sourcePatterns[0]),
-        buildLifeLevelInteraction(sourcePatterns),
-        buildStateOfAffairsLine(sourcePatterns[2] ?? sourcePatterns[1] ?? sourcePatterns[0]),
+        durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
+        recentPattern ? buildRecentStateLine(recentPattern) : '',
+        buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern) => Boolean(pattern))),
+        bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
     ]).slice(0, 3);
     return {
         title: 'State of affairs',
