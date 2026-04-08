@@ -1496,38 +1496,72 @@ function buildThreadClaim(label: string, snippet: string, summary: string, secti
   const anchor = firstSentence(sectionContent || snippet || summary, 180)
   const family = themeFamilyForText(`${label} ${anchor}`)
   const cleanedLabel = simplifyPatternTitle(label)
+  const lowerAnchor = anchor.toLowerCase()
 
   if (family?.key === 'self-authorization') {
+    if (/ask|reach out|permission|allowed|entitled/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is not just wanting something, but needing permission or legitimacy to feel settled before asking for it')
+    }
     return formatPatternSentence('The recurring move is needing legitimacy or capability to feel established before asking directly for what you want')
   }
   if (family?.key === 'outward-proof') {
+    if (/admired|authority|someone else|proof|validation/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is treating another person’s desire, status, or authority as proof that your own wanting is legitimate')
+    }
     return formatPatternSentence('The thread is checking outward for proof or borrowed conviction before trusting your own desire')
   }
   if (family?.key === 'alignment-drift') {
+    if (/surrender|alignment|misaligned/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is asking how to build deliberately without moving farther from surrender or alignment')
+    }
     return formatPatternSentence('The thread is tracking the distance between an aligned/surrendered state and the mode daily life is actually rewarding')
   }
   if (family?.key === 'certainty-delay') {
+    if (/wait|later|delay|readiness|certainty/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is waiting for enough certainty or readiness before making a move that would actually create more information')
+    }
     return formatPatternSentence('The thread is postponing visible movement until more certainty appears, then feeling the cost of that delay')
   }
   if (family?.key === 'relationship-attunement') {
+    if (/love|attun|seen|partner|relationship/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is clarifying that closeness only feels real when it is expressive, attuned, and specifically felt')
+    }
     return formatPatternSentence('The thread is testing whether closeness feels specifically attuned and expressive enough to count as real love')
   }
   if (family?.key === 'collaboration-threshold') {
+    if (/solo|alone|collaborator|partner|team|who not how/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is moving from solo effort toward the question of who would actually make the work larger or more real')
+    }
     return formatPatternSentence('The thread is moving from solo effort toward the question of who would actually make the work larger or more real')
   }
   if (family?.key === 'family-mission') {
+    if (/family|mission|surrender|organize|life/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is treating family as a life-orienting mission and asking what present-day choices should serve it')
+    }
     return formatPatternSentence('The thread is treating family as a life-orienting mission and asking what present-day choices should serve that')
   }
   if (family?.key === 'depth-craft') {
+    if (/depth|craft|shallow|broad|immers/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is pulling toward deeper craft and sustained immersion rather than broad but shallow motion')
+    }
     return formatPatternSentence('The thread is wanting deeper craft or sustained immersion instead of a broad-but-shallow mode')
   }
   if (family?.key === 'output-anchor') {
+    if (/consum|consumed|show for|ship|output|produce/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is using concrete output as a way to make time feel real rather than consumed by circling or intake')
+    }
     return formatPatternSentence('The thread is using concrete output as a way to make time feel real rather than consumed by circling or intake')
   }
   if (family?.key === 'physical-pull') {
+    if (/physical|body|embodied|collage|sport|coach/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is pointing toward embodied forms of making that feel more alive than staying only in abstraction')
+    }
     return formatPatternSentence('The thread is being pulled toward tactile or physical forms of making that feel more embodied than pure abstraction')
   }
   if (family?.key === 'missed-window') {
+    if (/earlier|window|missed|timing|late/.test(lowerAnchor)) {
+      return formatPatternSentence('The thread is revisiting an older timing decision and asking what is signal versus self-punishment')
+    }
     return formatPatternSentence('The thread is replaying old timing windows and trying to extract usable signal without turning that into self-punishment')
   }
 
@@ -1834,9 +1868,7 @@ function buildOverviewFromCluster(
   familyKey: string | undefined,
   evidence: string[],
 ) {
-  const cleanEvidence = evidence
-    .map((item) => cleanTruncatedEnding(item))
-    .filter((item) => item && !evidenceLooksFragmentary(item))
+  void evidence
 
   const familyOverviews: Record<string, string> = {
     'self-authorization':
@@ -1869,20 +1901,7 @@ function buildOverviewFromCluster(
       ? `${title} keeps recurring across ${entryCount} entries, but the underlying shape is still emerging.`
       : `${title} is present in this entry, but the underlying shape is still emerging.`)
 
-  const firstExample = cleanEvidence[0] ?? ''
-  const secondExample = cleanEvidence.find((item, index) =>
-    index > 0 && semanticSimilarity(item, firstExample) < 0.42,
-  ) ?? ''
-  const parts = [
-    intro,
-    firstExample ? `Recent evidence: ${/[.!?]$/.test(firstExample) ? firstExample : `${firstExample}.`}` : '',
-    secondExample && semanticSimilarity(secondExample, firstExample) < 0.42
-      ? (/[.!?]$/.test(secondExample) ? secondExample : `${secondExample}.`)
-      : '',
-  ]
-    .filter(Boolean)
-
-  return cleanTruncatedEnding(parts.join(' ')) || title
+  return cleanTruncatedEnding(intro) || title
 }
 
 function formatPatternSentence(text: string) {
@@ -2246,16 +2265,16 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
 
   const themeSummary = dedupePatternLines([
     pattern.supportingEvidence?.[0]?.claim ?? '',
-    pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
     pattern.supportingEvidence?.[1]?.claim ?? '',
+    pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
   ].filter(Boolean), pattern.overview).slice(0, 3)
 
   const detailNarrative = dedupePatternLines([
     pattern.supportingEvidence?.[0]?.claim ?? '',
+    pattern.supportingEvidence?.[1]?.claim ?? '',
     pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
-    pattern.dimensions[0] ?? '',
-    pattern.dimensions[1] ?? '',
-  ].filter(Boolean), `${pattern.overview}\n${themeSummary.join('\n')}`).slice(0, 4)
+    pattern.supportingEvidence?.[1]?.whyItMatters ?? '',
+  ].filter(Boolean), pattern.overview).slice(0, 3)
 
   return {
     ...pattern,

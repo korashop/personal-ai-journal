@@ -47,6 +47,14 @@ function cleanDisplayText(text: string) {
   return (text ?? '').replace(/\bkyli\b/gi, 'skills')
 }
 
+function shortDisplayText(text: string, maxLength = 200) {
+  const cleaned = cleanDisplayText(text).replace(/\s+/g, ' ').trim()
+  if (cleaned.length <= maxLength) return cleaned
+  const clipped = cleaned.slice(0, maxLength)
+  const boundary = clipped.lastIndexOf(' ')
+  return `${(boundary > 80 ? clipped.slice(0, boundary) : clipped).trim()}...`
+}
+
 function sourceTypeLabel(sourceType?: 'raw_quote' | 'analysis_quote' | 'summary_fallback') {
   if (sourceType === 'raw_quote') return 'Exact quote'
   if (sourceType === 'analysis_quote') return 'Analysis quote'
@@ -207,7 +215,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     () =>
       filterDistinctLines(
         (selectedPattern?.dimensions ?? []).map(cleanDisplayText),
-        cleanDisplayText(selectedPattern?.overview ?? ''),
+        `${cleanDisplayText(selectedPattern?.overview ?? '')}\n${(selectedPattern?.detailNarrative ?? selectedPattern?.themeSummary ?? [])
+          .map(cleanDisplayText)
+          .join('\n')}`,
       ),
     [selectedPattern],
   )
@@ -216,8 +226,8 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     () =>
       filterDistinctLines(
         (selectedPattern?.detailNarrative ?? selectedPattern?.themeSummary ?? []).map(cleanDisplayText),
-        `${cleanDisplayText(selectedPattern?.overview ?? '')}\n${(selectedPattern?.dimensions ?? []).join('\n')}`,
-      ),
+        cleanDisplayText(selectedPattern?.overview ?? ''),
+      ).slice(0, 3),
     [selectedPattern],
   )
 
@@ -378,9 +388,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                             <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
                           </div>
                           <p className="pattern-prominence-copy">{prominenceLabel(pattern)}</p>
-                          <p className="pattern-home-preview">{cleanDisplayText(pattern.overview)}</p>
+                          <p className="pattern-home-preview">{shortDisplayText(pattern.overview, 170)}</p>
                           {pattern.changeSummary?.[0] ? (
-                            <p className="pattern-home-shift">{cleanDisplayText(pattern.changeSummary[0])}</p>
+                            <p className="pattern-home-shift">{shortDisplayText(pattern.changeSummary[0], 120)}</p>
                           ) : null}
                           <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                         </button>
@@ -487,7 +497,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   <ul className="pattern-list compact">
                     {detailNarrative.map((line) => (
                       <li className="pattern-list-item relaxed" key={line}>
-                        <ReactMarkdown>{line}</ReactMarkdown>
+                        <ReactMarkdown>{cleanDisplayText(line)}</ReactMarkdown>
                       </li>
                     ))}
                   </ul>
@@ -500,7 +510,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   <ul className="pattern-list compact">
                     {distinctDimensions.map((dimension) => (
                       <li className="pattern-list-item relaxed" key={dimension}>
-                        <ReactMarkdown>{dimension}</ReactMarkdown>
+                        <ReactMarkdown>{cleanDisplayText(dimension)}</ReactMarkdown>
                       </li>
                     ))}
                   </ul>
