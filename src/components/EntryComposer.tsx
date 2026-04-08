@@ -95,6 +95,28 @@ function detectSplitCandidates(text: string): SplitCandidate[] {
     .filter((candidate) => cleanSplitText(candidate.rawText))
 }
 
+type MissingOcrPage = {
+  pageNumber: number
+  fileName?: string
+}
+
+function detectMissingOcrPages(text: string, photos: File[]): MissingOcrPage[] {
+  return text
+    .split(/\n\s*---\s*\n/g)
+    .map((section) => section.trim())
+    .flatMap((section) => {
+      if (!/\[OCR unavailable(?: for this image| right now)\]/i.test(section)) return []
+      const match = section.match(/(?:Page|Image)\s+(\d+)/i)
+      const pageNumber = match ? Number(match[1]) : NaN
+      if (!Number.isFinite(pageNumber)) return []
+      return [{
+        pageNumber,
+        fileName: photos[pageNumber - 1]?.name,
+      }]
+    })
+    .sort((left, right) => left.pageNumber - right.pageNumber)
+}
+
 type EntryComposerProps = {
   busy: boolean
   submitPhase: 'idle' | 'submitting' | 'submitting_split'
@@ -159,6 +181,10 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
   const splitCandidates = useMemo(
     () => (reviewReady && !rawText.trim() ? detectSplitCandidates(transcribedText) : []),
     [rawText, reviewReady, transcribedText],
+  )
+  const missingOcrPages = useMemo(
+    () => (reviewReady ? detectMissingOcrPages(transcribedText, photos) : []),
+    [photos, reviewReady, transcribedText],
   )
   const captureStatusText = getCaptureStatusText({
     busy,
@@ -448,8 +474,27 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
             <div className="transcription-review">
               <div className="transcription-review-header">
                 <p className="subtle-label">Transcription review</p>
-                <span className="hint">Edit here, then submit</span>
+                <span className="hint">
+                  {missingOcrPages.length
+                    ? `Fill in ${missingOcrPages.length} missing page${missingOcrPages.length === 1 ? '' : 's'} below, then submit`
+                    : 'Edit here, then submit'}
+                </span>
               </div>
+              {missingOcrPages.length ? (
+                <div className="ocr-missing-panel">
+                  <p className="ocr-missing-title">These pages still need manual fill-in</p>
+                  <p className="hint">
+                    The upload can still finish, but analysis will be weaker unless you replace the placeholder text for these pages in the review box below.
+                  </p>
+                  <div className="ocr-missing-list">
+                    {missingOcrPages.map((item) => (
+                      <span className="ocr-missing-chip" key={`${item.pageNumber}-${item.fileName ?? 'page'}`}>
+                        Page {item.pageNumber}{item.fileName ? ` - ${item.fileName}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <textarea
                 className="entry-textarea transcription-textarea"
                 onChange={(event) => setTranscribedText(event.target.value)}
