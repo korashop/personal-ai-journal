@@ -111,17 +111,16 @@ export type PatternSection = {
     updatedAt: string;
 };
 export type PatternsBrief = {
-    headline: string;
+    title: string;
     summary: string;
-    focus: Array<{
-        patternId: string;
-        title: string;
-        whyNow: string;
-    }>;
+    currentState: string[];
+    tensions: string[];
     prompts: Array<{
         patternId: string;
         text: string;
     }>;
+    surfacedCount: number;
+    quietCount: number;
 };
 export type PatternReplyPayload = {
     answer: string;

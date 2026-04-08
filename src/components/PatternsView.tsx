@@ -287,8 +287,8 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
             .filter((prompt) => prompt.patternId === selectedPattern?.id)
             .map((prompt) => cleanDisplayText(prompt.text)) ?? []),
           ...(selectedPattern?.changeSummary?.length ? ['What changed recently here?'] : []),
-          selectedPattern?.exploreOptions[0] ? cleanDisplayText(selectedPattern.exploreOptions[0]) : '',
           selectedPattern?.questions[0] ? cleanDisplayText(selectedPattern.questions[0]) : '',
+          selectedPattern?.exploreOptions[0] ? cleanDisplayText(selectedPattern.exploreOptions[0]) : '',
           'What would be a small real-world test of this theme?',
           'What evidence would make this theme less true?',
         ].filter(Boolean),
@@ -396,30 +396,39 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                 {patternsBrief ? (
                   <section className="pattern-brief-card">
                     <div className="pattern-brief-header">
-                      <p className="subtle-label">Today in patterns</p>
-                      <h3>{patternsBrief.headline}</h3>
-                      <p className="pattern-brief-summary">{patternsBrief.summary}</p>
+                      <p className="subtle-label">{patternsBrief.title}</p>
+                      <h3>{patternsBrief.summary}</h3>
+                      <p className="pattern-brief-meta">
+                        {patternsBrief.surfacedCount} live theme{patternsBrief.surfacedCount === 1 ? '' : 's'} surfaced right now.
+                        {patternsBrief.quietCount ? ` ${patternsBrief.quietCount} of them are still quieter or earlier signals.` : ''}
+                      </p>
                     </div>
 
-                    {patternsBrief.focus.length ? (
-                      <div className="pattern-brief-focus-list">
-                        {patternsBrief.focus.map((item) => (
-                          <button
-                            className="pattern-brief-focus-item"
-                            key={item.patternId}
-                            onClick={() => openPattern(item.patternId)}
-                            type="button"
-                          >
-                            <strong>{item.title}</strong>
-                            <span>{shortDisplayText(item.whyNow, 140)}</span>
-                          </button>
-                        ))}
+                    {patternsBrief.currentState.length ? (
+                      <div className="pattern-brief-section">
+                        <p className="subtle-label">What seems most live</p>
+                        <ul className="pattern-brief-list">
+                          {patternsBrief.currentState.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {patternsBrief.tensions.length ? (
+                      <div className="pattern-brief-section">
+                        <p className="subtle-label">What may be interacting</p>
+                        <ul className="pattern-brief-list">
+                          {patternsBrief.tensions.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
                       </div>
                     ) : null}
 
                     {patternsBrief.prompts.length ? (
                       <div className="pattern-brief-prompts">
-                        <p className="subtle-label">Good place to start</p>
+                        <p className="subtle-label">Try asking</p>
                         <div className="explore-options">
                           {patternsBrief.prompts.map((prompt) => (
                             <button

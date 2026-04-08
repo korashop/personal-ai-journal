@@ -2419,8 +2419,8 @@ function buildBriefWhyNow(pattern: PatternSection) {
 
 function buildBriefPrompt(pattern: PatternSection) {
   const candidate = dedupePatternLines([
-    ...(pattern.exploreOptions ?? []),
     ...(pattern.questions ?? []),
+    ...(pattern.exploreOptions ?? []),
   ], pattern.overview)[0]
 
   if (candidate) {
@@ -2432,21 +2432,78 @@ function buildBriefPrompt(pattern: PatternSection) {
     : 'What feels most worth testing here right now?'
 }
 
+function patternFamilyKey(pattern: PatternSection) {
+  return themeFamilyForText(`${pattern.title} ${pattern.overview} ${(pattern.dimensions ?? []).join(' ')}`)?.key ?? null
+}
+
+function buildBriefInteractionSummary(patterns: PatternSection[]) {
+  const lead = patterns[0]
+  const second = patterns[1]
+  if (!lead) return ''
+  if (!second) {
+    return `The clearest live thread right now is ${lowerCaseFirst(lead.title)}, especially around ${lowerCaseFirst(buildBriefWhyNow(lead))}`
+  }
+
+  const leadKey = patternFamilyKey(lead)
+  const secondKey = patternFamilyKey(second)
+  const pair = `${leadKey}|${secondKey}`
+
+  if (pair === 'output-anchor|certainty-delay' || pair === 'certainty-delay|output-anchor') {
+    return 'You want days to feel real through concrete movement, but visible movement keeps waiting for more certainty first'
+  }
+
+  if (pair === 'outward-proof|certainty-delay' || pair === 'certainty-delay|outward-proof') {
+    return 'Borrowed conviction and waiting for certainty are reinforcing each other, so action keeps getting postponed until the path feels externally confirmed'
+  }
+
+  if (pair === 'outward-proof|self-authorization' || pair === 'self-authorization|outward-proof') {
+    return 'External proof and internal permission are feeding the same loop, where desire feels hardest to trust without some outside signal'
+  }
+
+  if (pair === 'depth-craft|output-anchor' || pair === 'output-anchor|depth-craft') {
+    return 'There is a real pull toward shipping and visible output, but also a refusal to let shallow production masquerade as deeper craft'
+  }
+
+  if (pair === 'collaboration-threshold|output-anchor' || pair === 'output-anchor|collaboration-threshold') {
+    return 'The wish to make something real is colliding with a live question about who else would make the work larger, stronger, or more sustainable'
+  }
+
+  if (pair === 'family-mission|alignment-drift' || pair === 'alignment-drift|family-mission') {
+    return 'Family is showing up less as an abstract future wish and more as an organizing direction, while the journal keeps testing how to build toward it without losing alignment'
+  }
+
+  return `${lead.title} feels most live, while ${lowerCaseFirst(second.title)} is shaping how that theme is actually being carried or delayed`
+}
+
+function buildBriefTensions(patterns: PatternSection[]) {
+  const sourcePatterns = patterns.slice(0, 3)
+  const lead = sourcePatterns[0]
+  const second = sourcePatterns[1]
+  const third = sourcePatterns[2]
+  const notes: string[] = []
+
+  if (lead && second) {
+    notes.push(buildBriefInteractionSummary([lead, second]))
+  }
+
+  if (third) {
+    notes.push(`${third.title} still feels live in the background, which is part of the current texture rather than a separate story`)
+  }
+
+  return dedupePatternLines(notes).slice(0, 2)
+}
+
 export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
   if (!patterns.length) return null
 
   const sorted = [...patterns].sort(compareThemePriority)
   const focusPatterns = sorted.filter((pattern) => pattern.prominence !== 'quiet').slice(0, 3)
   const sourcePatterns = focusPatterns.length ? focusPatterns : sorted.slice(0, 3)
-  const leadPattern = sourcePatterns[0]
+  if (!sourcePatterns.length) return null
 
-  if (!leadPattern) return null
-
-  const focus = sourcePatterns.map((pattern) => ({
-    patternId: pattern.id,
-    title: pattern.title,
-    whyNow: buildBriefWhyNow(pattern),
-  }))
+  const currentState = dedupePatternLines(
+    sourcePatterns.map((pattern) => buildBriefWhyNow(pattern)),
+  ).slice(0, 3)
 
   const prompts = sourcePatterns
     .map((pattern) => ({
@@ -2456,21 +2513,26 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
     .filter((prompt, index, items) =>
       items.findIndex((candidate) => normalizeWhitespace(candidate.text).toLowerCase() === normalizeWhitespace(prompt.text).toLowerCase()) === index,
     )
-    .slice(0, 4)
+    .slice(0, 3)
 
-  const trailingTitles = sourcePatterns.slice(1).map((pattern) => pattern.title)
+  const surfacedCount = patterns.length
+  const quietCount = patterns.filter((pattern) => pattern.prominence === 'quiet' || pattern.entryCount <= 1).length
   const summary =
-    trailingTitles.length >= 2
-      ? `${leadPattern.title} leads the map right now, while ${trailingTitles[0]} and ${trailingTitles[1]} still feel live in the background.`
-      : trailingTitles.length === 1
-        ? `${leadPattern.title} looks most live right now, with ${trailingTitles[0]} also worth attention.`
-        : `${leadPattern.title} looks like the clearest place to start today.`
+    sourcePatterns.length >= 3
+      ? `The map is currently centering on ${sourcePatterns[0].title}, with ${sourcePatterns[1].title} and ${sourcePatterns[2].title} also staying live.`
+      : sourcePatterns.length === 2
+        ? `The map is currently centering on ${sourcePatterns[0].title}, with ${sourcePatterns[1].title} also staying live.`
+        : `The clearest live thread right now is ${sourcePatterns[0].title}.`
+  const tensions = buildBriefTensions(sourcePatterns)
 
   return {
-    headline: `${leadPattern.title} is the clearest place to start.`,
+    title: 'Current read',
     summary,
-    focus,
+    currentState,
+    tensions,
     prompts,
+    surfacedCount,
+    quietCount,
   }
 }
 
