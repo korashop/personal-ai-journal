@@ -55,6 +55,12 @@ function sourceTypeLabel(sourceType?: 'raw_quote' | 'analysis_quote' | 'summary_
   return 'Fallback summary'
 }
 
+function briefBulletLabel(kind: PatternsBrief['bullets'][number]['kind']) {
+  if (kind === 'durable') return 'Stable undercurrent'
+  if (kind === 'recent') return 'More alive lately'
+  return 'What this may be asking'
+}
+
 function overlapScore(left: string, right: string) {
   const leftTokens = new Set(normalizeForComparison(left).split(' ').filter((token) => token.length > 3))
   const rightTokens = new Set(normalizeForComparison(right).split(' ').filter((token) => token.length > 3))
@@ -137,9 +143,14 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     setShowChatPanel(true)
   }, [selectedPatternId])
 
+  const briefBulletSignature = useMemo(
+    () => (patternsBrief?.bullets ?? []).map((bullet) => `${bullet.kind}:${bullet.text}`).join('|'),
+    [patternsBrief?.bullets],
+  )
+
   useEffect(() => {
     setShowExpandedBrief(false)
-  }, [patternsBrief?.bullets, patternsBrief?.expandedOverview?.summary])
+  }, [briefBulletSignature, patternsBrief?.expandedOverview?.summary])
 
   useEffect(() => {
     if ((patterns.length > 5 && !patterns.some(patternLooksPlaceholder)) || entries.length < 10) {
@@ -412,8 +423,11 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                     {patternsBrief.bullets.length ? (
                       <div className="pattern-brief-section">
                         <ul className="pattern-brief-list">
-                          {patternsBrief.bullets.map((line) => (
-                            <li key={line}>{line}</li>
+                          {patternsBrief.bullets.map((bullet) => (
+                            <li key={`${bullet.kind}-${bullet.text}`}>
+                              <span className="pattern-brief-kicker">{briefBulletLabel(bullet.kind)}</span>
+                              <span>{bullet.text}</span>
+                            </li>
                           ))}
                         </ul>
                       </div>

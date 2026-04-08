@@ -2181,6 +2181,13 @@ function buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern
         sections,
     };
 }
+function labelBriefBulletKind(kind) {
+    if (kind === 'durable')
+        return 'Stable undercurrent';
+    if (kind === 'recent')
+        return 'More alive lately';
+    return 'What this may be asking';
+}
 export function buildPatternsBrief(patterns) {
     if (!patterns.length)
         return null;
@@ -2200,17 +2207,38 @@ export function buildPatternsBrief(patterns) {
     }))
         .filter((prompt, index, items) => items.findIndex((candidate) => normalizeWhitespace(candidate.text).toLowerCase() === normalizeWhitespace(prompt.text).toLowerCase()) === index)
         .slice(0, 1);
-    const bullets = dedupePatternLines([
-        durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
-        recentPattern ? buildRecentStateLine(recentPattern) : '',
-        buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern) => Boolean(pattern))),
-        bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
-    ]).slice(0, 3);
+    const rawBullets = [
+        {
+            kind: 'durable',
+            text: durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
+        },
+        {
+            kind: 'recent',
+            text: recentPattern ? buildRecentStateLine(recentPattern) : '',
+        },
+        {
+            kind: 'next',
+            text: buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern) => Boolean(pattern))) ||
+                (bridgePattern ? buildStateOfAffairsLine(bridgePattern) : ''),
+        },
+    ];
+    const dedupedTexts = dedupePatternLines(rawBullets.map((bullet) => bullet.text)).slice(0, 3);
+    const bullets = dedupedTexts.map((text) => rawBullets.find((bullet) => bullet.text === text) ?? {
+        kind: 'durable',
+        text,
+    });
     const prompt = prompts[0] ?? null;
+    const expandedOverview = buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt);
     return {
         title: 'State of affairs',
         bullets,
-        expandedOverview: buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt),
+        expandedOverview: expandedOverview ?? {
+            summary: '',
+            sections: bullets.map((bullet) => ({
+                title: labelBriefBulletKind(bullet.kind),
+                lines: [bullet.text],
+            })),
+        },
         prompt,
     };
 }

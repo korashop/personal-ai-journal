@@ -2648,6 +2648,12 @@ function buildExpandedBriefOverview(
   }
 }
 
+function labelBriefBulletKind(kind: 'durable' | 'recent' | 'next') {
+  if (kind === 'durable') return 'Stable undercurrent'
+  if (kind === 'recent') return 'More alive lately'
+  return 'What this may be asking'
+}
+
 export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
   if (!patterns.length) return null
 
@@ -2687,19 +2693,41 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
     )
     .slice(0, 1)
 
-  const bullets = dedupePatternLines([
-    durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
-    recentPattern ? buildRecentStateLine(recentPattern) : '',
-    buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern): pattern is PatternSection => Boolean(pattern))),
-    bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
-  ]).slice(0, 3)
+  const rawBullets: Array<{ kind: 'durable' | 'recent' | 'next'; text: string }> = [
+    {
+      kind: 'durable',
+      text: durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
+    },
+    {
+      kind: 'recent',
+      text: recentPattern ? buildRecentStateLine(recentPattern) : '',
+    },
+    {
+      kind: 'next',
+      text: buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern): pattern is PatternSection => Boolean(pattern))) ||
+        (bridgePattern ? buildStateOfAffairsLine(bridgePattern) : ''),
+    },
+  ]
+
+  const dedupedTexts = dedupePatternLines(rawBullets.map((bullet) => bullet.text)).slice(0, 3)
+  const bullets = dedupedTexts.map((text) => rawBullets.find((bullet) => bullet.text === text) ?? {
+    kind: 'durable' as const,
+    text,
+  })
 
   const prompt = prompts[0] ?? null
+  const expandedOverview = buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt)
 
   return {
     title: 'State of affairs',
     bullets,
-    expandedOverview: buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt),
+    expandedOverview: expandedOverview ?? {
+      summary: '',
+      sections: bullets.map((bullet) => ({
+        title: labelBriefBulletKind(bullet.kind),
+        lines: [bullet.text],
+      })),
+    },
     prompt,
   }
 }

@@ -123,7 +123,10 @@ export type PatternSection = {
 
 export type PatternsBrief = {
   title: string
-  bullets: string[]
+  bullets: Array<{
+    kind: 'durable' | 'recent' | 'next'
+    text: string
+  }>
   expandedOverview?: {
     summary: string
     sections: Array<{

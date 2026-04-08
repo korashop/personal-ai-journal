@@ -1204,11 +1204,21 @@ button {
 }
 
 .pattern-brief-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding-left: 2px;
 }
 
 .pattern-brief-list.compact {
   gap: 8px;
+}
+
+.pattern-brief-kicker {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .pattern-tier-section {
