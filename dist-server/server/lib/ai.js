@@ -2140,15 +2140,19 @@ function buildLifeLevelInteraction(patterns) {
     }
     return '';
 }
-function buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt) {
+function buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern) {
+    const interactionLine = buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern) => Boolean(pattern)));
     const summary = dedupePatternLines([
-        buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern) => Boolean(pattern))),
-        durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
+        interactionLine,
         recentPattern ? buildRecentStateLine(recentPattern) : '',
-    ]).slice(0, 2).join(' ');
+        durablePattern && durablePattern.id !== recentPattern?.id ? buildStateOfAffairsLine(durablePattern) : '',
+    ])
+        .slice(0, 2)
+        .map((line) => formatPatternSentence(line))
+        .join(' ');
     const stableLines = dedupePatternLines([
         durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
-        bridgePattern && bridgePattern.id !== durablePattern?.id ? buildStateOfAffairsLine(bridgePattern) : '',
+        durablePattern?.overview ? sanitizePatternOverviewText(durablePattern.overview) : '',
     ]).slice(0, 2);
     const recentLines = dedupePatternLines([
         recentPattern ? buildRecentStateLine(recentPattern) : '',
@@ -2156,21 +2160,21 @@ function buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern
         recentPattern?.supportingEvidence?.[0]?.claim ?? '',
     ]).slice(0, 2);
     const nextLines = dedupePatternLines([
-        buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern) => Boolean(pattern))),
-        prompt?.text ?? '',
-        bridgePattern && bridgePattern.id !== durablePattern?.id ? buildStateOfAffairsLine(bridgePattern) : '',
+        bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
+        interactionLine,
+        bridgePattern?.changeSummary?.[0] ?? '',
     ]).slice(0, 2);
     const sections = [
         {
-            title: 'More stable undercurrents',
+            title: 'What seems steady',
             lines: stableLines,
         },
         {
-            title: 'What has felt more alive lately',
+            title: 'What has sharpened lately',
             lines: recentLines,
         },
         {
-            title: 'What this may be asking',
+            title: 'What may matter next',
             lines: nextLines,
         },
     ].filter((section) => section.lines.length);
@@ -2228,7 +2232,7 @@ export function buildPatternsBrief(patterns) {
         text,
     });
     const prompt = prompts[0] ?? null;
-    const expandedOverview = buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt);
+    const expandedOverview = buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern);
     return {
         title: 'State of affairs',
         bullets,

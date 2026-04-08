@@ -1165,9 +1165,15 @@ button {
 .pattern-brief-expanded {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pattern-brief-summary-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .pattern-brief-summary {
@@ -1178,9 +1184,9 @@ button {
 }
 
 .pattern-brief-expanded-sections {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .pattern-brief-expanded-section {
@@ -1626,10 +1632,6 @@ button {
   .pattern-brief-topbar {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .pattern-brief-expanded-sections {
-    grid-template-columns: 1fr;
   }
 
   .pattern-home-summary {

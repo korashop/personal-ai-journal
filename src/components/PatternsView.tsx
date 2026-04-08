@@ -420,7 +420,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                       ) : null}
                     </div>
 
-                    {patternsBrief.bullets.length ? (
+                    {!showExpandedBrief && patternsBrief.bullets.length ? (
                       <div className="pattern-brief-section">
                         <ul className="pattern-brief-list">
                           {patternsBrief.bullets.map((bullet) => (
@@ -436,7 +436,10 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                     {showExpandedBrief && patternsBrief.expandedOverview ? (
                       <div className="pattern-brief-expanded">
                         {patternsBrief.expandedOverview.summary ? (
-                          <p className="pattern-brief-summary">{patternsBrief.expandedOverview.summary}</p>
+                          <div className="pattern-brief-summary-block">
+                            <p className="subtle-label">Overall read</p>
+                            <p className="pattern-brief-summary">{patternsBrief.expandedOverview.summary}</p>
+                          </div>
                         ) : null}
 
                         <div className="pattern-brief-expanded-sections">
