@@ -1249,15 +1249,15 @@ button {
 .pattern-brief-expanded {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.pattern-brief-summary-block {
+.pattern-brief-memo {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 
 .pattern-brief-summary {
@@ -1265,22 +1265,6 @@ button {
   color: var(--muted);
   line-height: 1.65;
   max-width: 78ch;
-}
-
-.pattern-brief-expanded-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.pattern-brief-expanded-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .pattern-brief-list {

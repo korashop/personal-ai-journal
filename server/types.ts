@@ -145,11 +145,7 @@ export type PatternsBrief = {
     text: string
   }>
   expandedOverview?: {
-    summary: string
-    sections: Array<{
-      title: string
-      lines: string[]
-    }>
+    paragraphs: string[]
   } | null
   prompt?: {
     patternId: string

@@ -2605,59 +2605,32 @@ function buildExpandedBriefOverview(
     [durablePattern, recentPattern].filter((pattern): pattern is PatternSection => Boolean(pattern)),
   )
 
-  const summary = dedupePatternLines([
+  const firstParagraph = dedupePatternLines([
     interactionLine,
     recentPattern ? buildRecentStateLine(recentPattern) : '',
     durablePattern && durablePattern.id !== recentPattern?.id ? buildStateOfAffairsLine(durablePattern) : '',
   ])
+    .slice(0, interactionLine ? 2 : 3)
+    .map((line) => formatPatternSentence(line))
+    .join(' ')
+
+  const secondParagraph = dedupePatternLines([
+    bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
+    bridgePattern?.changeSummary?.[0] ?? '',
+    recentPattern?.changeSummary?.[0] ?? '',
+    recentPattern?.supportingEvidence?.[0]?.whyItMatters ?? '',
+  ], firstParagraph)
     .slice(0, 2)
     .map((line) => formatPatternSentence(line))
     .join(' ')
 
-  const stableLines = dedupePatternLines([
-    durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
-    durablePattern?.overview ? sanitizePatternOverviewText(durablePattern.overview) : '',
-  ]).slice(0, 2)
+  const paragraphs = [firstParagraph, secondParagraph].filter(Boolean)
 
-  const recentLines = dedupePatternLines([
-    recentPattern ? buildRecentStateLine(recentPattern) : '',
-    recentPattern?.changeSummary?.[0] ?? '',
-    recentPattern?.supportingEvidence?.[0]?.claim ?? '',
-  ]).slice(0, 2)
-
-  const nextLines = dedupePatternLines([
-    bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
-    interactionLine,
-    bridgePattern?.changeSummary?.[0] ?? '',
-  ]).slice(0, 2)
-
-  const sections = [
-    {
-      title: 'What seems steady',
-      lines: stableLines,
-    },
-    {
-      title: 'What has sharpened lately',
-      lines: recentLines,
-    },
-    {
-      title: 'What may matter next',
-      lines: nextLines,
-    },
-  ].filter((section) => section.lines.length)
-
-  if (!summary && !sections.length) return null
+  if (!paragraphs.length) return null
 
   return {
-    summary,
-    sections,
+    paragraphs,
   }
-}
-
-function labelBriefBulletKind(kind: 'durable' | 'recent' | 'next') {
-  if (kind === 'durable') return 'Stable undercurrent'
-  if (kind === 'recent') return 'More alive lately'
-  return 'What this may be asking'
 }
 
 export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
@@ -2728,11 +2701,9 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
     title: 'State of affairs',
     bullets,
     expandedOverview: expandedOverview ?? {
-      summary: '',
-      sections: bullets.map((bullet) => ({
-        title: labelBriefBulletKind(bullet.kind),
-        lines: [bullet.text],
-      })),
+      paragraphs: dedupePatternLines(bullets.map((bullet) => bullet.text))
+        .slice(0, 2)
+        .map((line) => formatPatternSentence(line)),
     },
     prompt,
   }

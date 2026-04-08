@@ -153,7 +153,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
 
   useEffect(() => {
     setShowExpandedBrief(false)
-  }, [briefBulletSignature, patternsBrief?.expandedOverview?.summary])
+  }, [briefBulletSignature, patternsBrief?.expandedOverview?.paragraphs])
 
   useEffect(() => {
     if (!patternsBrief) {
@@ -446,7 +446,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                               type="button"
                             >
                               {showExpandedBrief ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                              {showExpandedBrief ? 'Hide overview' : 'Expand overview'}
+                              {showExpandedBrief ? 'Hide summary' : 'Longer summary'}
                             </button>
                           ) : null}
                           <button
@@ -477,23 +477,9 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
 
                       {showExpandedBrief && patternsBrief.expandedOverview ? (
                         <div className="pattern-brief-expanded">
-                          {patternsBrief.expandedOverview.summary ? (
-                            <div className="pattern-brief-summary-block">
-                              <p className="subtle-label">Overall read</p>
-                              <p className="pattern-brief-summary">{patternsBrief.expandedOverview.summary}</p>
-                            </div>
-                          ) : null}
-
-                          <div className="pattern-brief-expanded-sections">
-                            {patternsBrief.expandedOverview.sections.map((section) => (
-                              <section className="pattern-brief-expanded-section" key={section.title}>
-                                <p className="subtle-label">{section.title}</p>
-                                <ul className="pattern-brief-list compact">
-                                  {section.lines.map((line) => (
-                                    <li key={line}>{line}</li>
-                                  ))}
-                                </ul>
-                              </section>
+                          <div className="pattern-brief-memo">
+                            {patternsBrief.expandedOverview.paragraphs.map((paragraph) => (
+                              <p className="pattern-brief-summary" key={paragraph}>{paragraph}</p>
                             ))}
                           </div>
                         </div>
