@@ -2978,6 +2978,7 @@ export async function generatePatternsUpdate(patterns, entries, memoryDoc, userM
     const brief = buildPatternsBrief(sortedPatterns);
     const defaultAsk = 'Knowing what you know about me from the journal, what is your take on where things stand right now and what questions matter most?';
     const effectiveMessage = userMessage?.trim() || defaultAsk;
+    const lifeAreaSummary = summarizePatternLifeAreas(sortedPatterns);
     if (!anthropic) {
         const briefLines = brief?.expandedOverview?.paragraphs?.length
             ? brief.expandedOverview.paragraphs
@@ -3001,12 +3002,18 @@ Style rules:
 - Do not repeat the same point in different wording.
 - Do not list theme names unless truly necessary.
 - Prefer concrete, human language over taxonomy words like "undercurrent", "pattern", or "signal".
+- Do not over-center work/career unless it is clearly the dominant reality in the evidence.
+- Check whether relationship, family, self-trust, embodiment, or life-direction themes are also active, and include them when they materially shape the picture.
+- If the journal contains both work-like and non-work concerns, synthesize the broader life situation instead of narrowing to the easiest work framing.
 
 Living memory:
 ${memoryForPrompt(memoryDoc, 1800)}
 
 Current themes:
 ${sortedPatterns.map((pattern) => `- ${pattern.title}: ${pattern.overview}`).join('\n') || 'None yet'}
+
+Life areas currently represented:
+${lifeAreaSummary}
 
 Recent shifts:
 ${sortedPatterns.flatMap((pattern) => (pattern.changeSummary ?? []).slice(0, 1).map((item) => `- ${pattern.title}: ${item}`)).join('\n') || 'No explicit recent shift notes.'}
@@ -3029,6 +3036,46 @@ ${clipForPrompt(effectiveMessage, 700)}`;
         .map((item) => item.text)
         .join('\n')
         .trim();
+}
+function summarizePatternLifeAreas(patterns) {
+    const counts = new Map();
+    for (const pattern of patterns) {
+        const area = classifyPatternLifeArea(pattern);
+        counts.set(area, (counts.get(area) ?? 0) + 1);
+    }
+    if (!counts.size)
+        return 'No clear area breakdown yet.';
+    const labels = {
+        work: 'Work / creation',
+        relationships: 'Relationships / family',
+        self: 'Self-trust / identity',
+        embodiment: 'Embodiment / physical life',
+        other: 'Other',
+    };
+    return [...counts.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .map(([area, count]) => `- ${labels[area] ?? area}: ${count}`)
+        .join('\n');
+}
+function classifyPatternLifeArea(pattern) {
+    const familyKey = patternFamilyKey(pattern);
+    if (familyKey === 'output-anchor' || familyKey === 'collaboration-threshold' || familyKey === 'depth-craft') {
+        return 'work';
+    }
+    if (familyKey === 'family-mission' || familyKey === 'relationship-attunement') {
+        return 'relationships';
+    }
+    if (familyKey === 'physical-pull') {
+        return 'embodiment';
+    }
+    if (familyKey === 'outward-proof' ||
+        familyKey === 'certainty-delay' ||
+        familyKey === 'self-authorization' ||
+        familyKey === 'alignment-drift' ||
+        familyKey === 'missed-window') {
+        return 'self';
+    }
+    return 'other';
 }
 export async function integratePatternReplyIntoMemory(currentMemory, pattern, userMessage, answer) {
     if (!anthropic) {

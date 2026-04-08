@@ -503,7 +503,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                             type="button"
                           >
                             {briefBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-                            {briefBusy ? 'Refreshing update...' : 'Refresh update'}
+                            {briefBusy ? 'Refreshing take...' : 'Refresh take'}
                           </button>
                           <button
                             className="ghost-button brief-toggle-button"
@@ -521,7 +521,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                         {updateThread.map((threadMessage) => (
                           <article className={`message ${threadMessage.role} ${threadMessage.state === 'pending' ? 'pending' : ''}`} key={threadMessage.id}>
                             <div className="message-meta">
-                              <span>{threadMessage.role === 'user' ? 'You' : 'Journal'}</span>
+                              <span>{threadMessage.role === 'user' ? 'You' : 'Companion'}</span>
                               {threadMessage.state === 'pending' ? <span>Writing...</span> : null}
                             </div>
                             <ReactMarkdown>{threadMessage.content}</ReactMarkdown>
@@ -531,7 +531,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
 
                       {briefPrompt ? (
                         <div className="pattern-brief-prompts">
-                          <p className="subtle-label">Good follow-up</p>
+                          <p className="subtle-label">Keep going</p>
                           <button
                             className="option-chip option-chip-inline"
                             onClick={() => setUpdateMessage(briefPrompt.text)}
@@ -571,7 +571,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                         type="button"
                       >
                         {briefBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-                        {briefBusy ? 'Generating update...' : 'Generate update'}
+                        {briefBusy ? 'Getting current take...' : 'Get current take'}
                       </button>
                     </section>
                   )
