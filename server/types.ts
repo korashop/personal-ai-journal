@@ -131,6 +131,8 @@ export type PatternSection = {
   }
   rankRationale?: string
   themeSummary?: string[]
+  detailNarrative?: string[]
+  changeSummary?: string[]
   entryIds: string[]
   entryCount: number
   updatedAt: string

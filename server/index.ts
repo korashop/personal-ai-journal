@@ -116,6 +116,8 @@ const patternReplySchema = z.object({
     }).optional(),
     rankRationale: z.string().optional(),
     themeSummary: z.array(z.string()).optional(),
+    detailNarrative: z.array(z.string()).optional(),
+    changeSummary: z.array(z.string()).optional(),
     entryIds: z.array(z.string()),
     entryCount: z.number().optional(),
     updatedAt: z.string().optional(),

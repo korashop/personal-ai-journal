@@ -2037,6 +2037,11 @@ function patternHasEnoughThemeEvidence(
 ) {
   if (!pattern.entryIds.length || !pattern.dimensions.length) return false
   if (pattern.dimensions.some((line) => evidenceLooksFragmentary(line))) return false
+  if (pattern.entryIds.length === 1) {
+    const rawQuoteEvidenceCount = (pattern.supportingEvidence ?? []).filter((item) => item.sourceType === 'raw_quote').length
+    const strongDimensions = dedupePatternLines(pattern.dimensions, pattern.overview).length
+    return rawQuoteEvidenceCount >= 1 && strongDimensions >= 2 && scoreThemeSignal(pattern) >= 14
+  }
   return scoreThemeSignal(pattern) >= 7
 }
 
@@ -2203,11 +2208,13 @@ type ThemeRankInput = {
   rankFactors?: PatternSection['rankFactors']
   rankRationale?: string
   themeSummary?: string[]
+  detailNarrative?: string[]
+  changeSummary?: string[]
 }
 
 function buildThemeRankMetadata<T extends ThemeRankInput>(
   pattern: T,
-): T & Pick<PatternSection, 'prominence' | 'rankScore' | 'rankFactors' | 'rankRationale' | 'themeSummary'> {
+): T & Pick<PatternSection, 'prominence' | 'rankScore' | 'rankFactors' | 'rankRationale' | 'themeSummary' | 'detailNarrative' | 'changeSummary'> {
   const recurrence =
     pattern.entryIds.length >= 6 ? 10 :
       pattern.entryIds.length >= 4 ? 8 :
@@ -2243,6 +2250,13 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
     pattern.supportingEvidence?.[1]?.claim ?? '',
   ].filter(Boolean), pattern.overview).slice(0, 3)
 
+  const detailNarrative = dedupePatternLines([
+    pattern.supportingEvidence?.[0]?.claim ?? '',
+    pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
+    pattern.dimensions[0] ?? '',
+    pattern.dimensions[1] ?? '',
+  ].filter(Boolean), `${pattern.overview}\n${themeSummary.join('\n')}`).slice(0, 4)
+
   return {
     ...pattern,
     prominence,
@@ -2255,6 +2269,8 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
     },
     rankRationale,
     themeSummary,
+    detailNarrative,
+    changeSummary: pattern.changeSummary ?? [],
   }
 }
 
@@ -2657,6 +2673,8 @@ function stripPatternIdentity(
     rankFactors: pattern.rankFactors,
     rankRationale: pattern.rankRationale,
     themeSummary: pattern.themeSummary,
+    detailNarrative: pattern.detailNarrative,
+    changeSummary: pattern.changeSummary,
     entryIds: pattern.entryIds,
   }
 }
@@ -2735,6 +2753,50 @@ function matchEnrichedCluster(
     parsed[fallbackIndex] ??
     null
   )
+}
+
+function describeThemeChange(
+  previousPattern: PatternSection | null,
+  nextPattern: Omit<PatternSection, 'id' | 'updatedAt' | 'entryCount' | 'status'>,
+) {
+  if (!previousPattern) {
+    return [
+      'This is a newly surfaced theme in the current journal window.',
+      nextPattern.supportingEvidence?.[0]?.snippet
+        ? `It appears because a recent entry named it directly: ${formatPatternSentence(nextPattern.supportingEvidence[0].snippet)}`
+        : '',
+    ].filter(Boolean)
+  }
+
+  const previousEntries = new Set(previousPattern.entryIds)
+  const newEntryIds = nextPattern.entryIds.filter((entryId) => !previousEntries.has(entryId))
+  const previousEvidence = new Set((previousPattern.supportingEvidence ?? []).map((item) => normalizePatternTitle(item.snippet)))
+  const freshEvidence = (nextPattern.supportingEvidence ?? []).filter(
+    (item) => !previousEvidence.has(normalizePatternTitle(item.snippet)),
+  )
+  const notes: string[] = []
+
+  if (newEntryIds.length >= 2) {
+    notes.push(`Support broadened into ${newEntryIds.length} new entries since the last refresh.`)
+  } else if (newEntryIds.length === 1) {
+    notes.push('A new entry reinforced this theme since the last refresh.')
+  } else {
+    notes.push('This theme is still holding across the same core set of entries.')
+  }
+
+  if (previousPattern.prominence !== nextPattern.prominence && nextPattern.prominence) {
+    if (previousPattern.prominence === 'quiet' && nextPattern.prominence !== 'quiet') {
+      notes.push('It has moved out of the background and is carrying more of the current map.')
+    } else if (previousPattern.prominence !== 'quiet' && nextPattern.prominence === 'quiet') {
+      notes.push('It is still real, but it is carrying less of the current dashboard than before.')
+    }
+  }
+
+  if (freshEvidence[0]?.snippet) {
+    notes.push(`Newest support: ${formatPatternSentence(freshEvidence[0].snippet)}`)
+  }
+
+  return notes.filter(Boolean).slice(0, 3)
 }
 
 async function enrichPatternClustersWithModel(
@@ -2896,12 +2958,20 @@ function reconcilePatterns(
           : 'emerging'
         : nextCount >= Math.max(previousCount + 2, 4)
           ? 'deepening'
-          : nextCount >= 2 || previousCount >= 2
+        : nextCount >= 2 || previousCount >= 2
             ? 'active'
             : 'emerging'
 
-    return buildThemeRankMetadata({
+    const prelim = buildThemeRankMetadata({
       ...pattern,
+      changeSummary: [],
+      detailNarrative: pattern.detailNarrative ?? [],
+    })
+    const changeSummary = describeThemeChange(matched, prelim)
+
+    return buildThemeRankMetadata({
+      ...prelim,
+      changeSummary,
       id: matched?.id ?? `pattern-${slugify(pattern.title) || Math.random().toString(36).slice(2, 8)}`,
       status,
       entryCount: pattern.entryIds.length,
@@ -3071,11 +3141,11 @@ ${pattern.title}
 Overview:
 ${pattern.overview}
 
-Why this theme is ranked here:
-${pattern.rankRationale ?? 'No rank rationale yet.'}
+What seems most true here:
+${(pattern.detailNarrative ?? pattern.themeSummary ?? []).map((item) => `- ${item}`).join('\n') || 'None yet'}
 
-Thread summary:
-${(pattern.themeSummary ?? []).map((item) => `- ${item}`).join('\n') || 'None yet'}
+Recent shifts:
+${(pattern.changeSummary ?? []).map((item) => `- ${item}`).join('\n') || 'No meaningful shift noted yet.'}
 
 Dimensions:
 ${pattern.dimensions.map((item) => `- ${item}`).join('\n')}

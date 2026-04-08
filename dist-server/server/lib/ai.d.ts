@@ -68,7 +68,7 @@ export declare function buildPatternDebugReport(entries: JournalEntry[]): {
             createdAt: string;
         }[];
         entryIds: string[];
-    } & Pick<PatternSection, "prominence" | "rankScore" | "rankFactors" | "rankRationale" | "themeSummary">;
+    } & Pick<PatternSection, "prominence" | "rankScore" | "rankFactors" | "rankRationale" | "themeSummary" | "detailNarrative" | "changeSummary">;
 }[];
 export declare function attachPatternSupportingEvidence(patterns: PatternSection[], entries: JournalEntry[]): PatternSection[];
 export declare function generateReply(entry: JournalEntry, userReply: string, context: Context): Promise<string>;

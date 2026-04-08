@@ -212,6 +212,24 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     [selectedPattern],
   )
 
+  const detailNarrative = useMemo(
+    () =>
+      filterDistinctLines(
+        (selectedPattern?.detailNarrative ?? selectedPattern?.themeSummary ?? []).map(cleanDisplayText),
+        `${cleanDisplayText(selectedPattern?.overview ?? '')}\n${(selectedPattern?.dimensions ?? []).join('\n')}`,
+      ),
+    [selectedPattern],
+  )
+
+  const changeSummary = useMemo(
+    () =>
+      filterDistinctLines(
+        (selectedPattern?.changeSummary ?? []).map(cleanDisplayText),
+        cleanDisplayText(selectedPattern?.overview ?? ''),
+      ),
+    [selectedPattern],
+  )
+
   const distinctQuestions = useMemo(
     () =>
       filterDistinctLines(
@@ -361,6 +379,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                           </div>
                           <p className="pattern-prominence-copy">{prominenceLabel(pattern)}</p>
                           <p className="pattern-home-preview">{cleanDisplayText(pattern.overview)}</p>
+                          {pattern.changeSummary?.[0] ? (
+                            <p className="pattern-home-shift">{cleanDisplayText(pattern.changeSummary[0])}</p>
+                          ) : null}
                           <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                         </button>
                       )
@@ -406,6 +427,17 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   </p>
                   <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
 
+                  {changeSummary.length ? (
+                    <>
+                      <h3>What shifted recently</h3>
+                      <ul>
+                        {changeSummary.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+
                   {supportingEvidenceRows.length ? (
                     <>
                       <h3>Supporting entry threads</h3>
@@ -449,15 +481,23 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
             </article>
 
             <div className="pattern-detail-grid simplified">
-              {distinctDimensions.length ? (
+              {detailNarrative.length ? (
                 <div className="pattern-column wide">
-                  <p className="subtle-label">What the theme is doing</p>
+                  <p className="subtle-label">What seems most true here</p>
                   <ul className="pattern-list compact">
-                    {(selectedPattern.themeSummary ?? []).map((summaryLine) => (
-                      <li className="pattern-list-item relaxed" key={summaryLine}>
-                        <ReactMarkdown>{cleanDisplayText(summaryLine)}</ReactMarkdown>
+                    {detailNarrative.map((line) => (
+                      <li className="pattern-list-item relaxed" key={line}>
+                        <ReactMarkdown>{line}</ReactMarkdown>
                       </li>
                     ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {distinctDimensions.length ? (
+                <div className="pattern-column wide">
+                  <p className="subtle-label">How it shows up</p>
+                  <ul className="pattern-list compact">
                     {distinctDimensions.map((dimension) => (
                       <li className="pattern-list-item relaxed" key={dimension}>
                         <ReactMarkdown>{dimension}</ReactMarkdown>
