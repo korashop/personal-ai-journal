@@ -26,6 +26,7 @@ export declare function rewriteMemoryDoc(currentMemory: MemoryDocumentRecord | n
 export declare function simplifyPatternTitle(title: string): string;
 export declare function chooseResurfacingCard(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], highlights: HighlightRecord[]): ResurfacingCard | null;
 export declare function buildEntryThreads(entry: JournalEntry): EntryThread[];
+export declare function sanitizePatternOverviewText(text: string): string;
 export declare function decoratePatternRanking(pattern: PatternSection): PatternSection;
 export declare function buildPatterns(memoryDoc: MemoryDocumentRecord | null, entries: JournalEntry[], previousPatterns?: PatternSection[]): Promise<PatternSection[]>;
 export declare function buildPatternDebugReport(entries: JournalEntry[]): {

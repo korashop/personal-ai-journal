@@ -1908,7 +1908,7 @@ function buildOverviewFromCluster(
   return cleanTruncatedEnding(intro) || title
 }
 
-function sanitizePatternOverviewText(text: string) {
+export function sanitizePatternOverviewText(text: string) {
   const cleaned = cleanTruncatedEnding(text)
     .replace(/\bRecent evidence:\s*.+$/i, '')
     .replace(/\bExample:\s*.+$/i, '')
@@ -2252,6 +2252,7 @@ type ThemeRankInput = {
 function buildThemeRankMetadata<T extends ThemeRankInput>(
   pattern: T,
 ): T & Pick<PatternSection, 'prominence' | 'rankScore' | 'rankFactors' | 'rankRationale' | 'themeSummary' | 'detailNarrative' | 'changeSummary'> {
+  const overview = sanitizePatternOverviewText(pattern.overview)
   const recurrence =
     pattern.entryIds.length >= 6 ? 10 :
       pattern.entryIds.length >= 4 ? 8 :
@@ -2259,7 +2260,7 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
           2
   const coherence = Math.max(
     2,
-    scoreThemeCoherence(pattern.title, pattern.overview, pattern.dimensions) * 2,
+    scoreThemeCoherence(pattern.title, overview, pattern.dimensions) * 2,
   )
   const weight = scoreThemeWeightFromEvidence(pattern)
   const freshness = scoreThemeFreshness(pattern)
@@ -2285,17 +2286,18 @@ function buildThemeRankMetadata<T extends ThemeRankInput>(
     pattern.supportingEvidence?.[0]?.claim ?? '',
     pattern.supportingEvidence?.[1]?.claim ?? '',
     pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
-  ].filter(Boolean), pattern.overview).slice(0, 3)
+  ].filter(Boolean), overview).slice(0, 3)
 
   const detailNarrative = dedupePatternLines([
     pattern.supportingEvidence?.[0]?.claim ?? '',
     pattern.supportingEvidence?.[1]?.claim ?? '',
     pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
     pattern.supportingEvidence?.[1]?.whyItMatters ?? '',
-  ].filter(Boolean), pattern.overview).slice(0, 3)
+  ].filter(Boolean), overview).slice(0, 3)
 
   return {
     ...pattern,
+    overview,
     prominence,
     rankScore,
     rankFactors: {

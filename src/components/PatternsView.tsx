@@ -430,18 +430,27 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
               <div className="memory-inline-drawer">
                 <p className="subtle-label">Why this theme exists</p>
                 <div className="memory-doc">
-                  <h2>{selectedPattern.title}</h2>
                   <p className="muted">
-                    This panel shows the concrete entry-thread evidence behind the theme. Exact raw-entry quotes are the strongest support;
+                    Concrete entry-thread evidence behind the current theme read. Exact raw-entry quotes are strongest;
                     analysis quotes and fallback summaries are weaker.
                   </p>
-                  <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
 
                   {changeSummary.length ? (
                     <>
                       <h3>What shifted recently</h3>
                       <ul>
                         {changeSummary.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+
+                  {detailNarrative.length ? (
+                    <>
+                      <h3>Current read from those threads</h3>
+                      <ul>
+                        {detailNarrative.map((line) => (
                           <li key={line}>{line}</li>
                         ))}
                       </ul>
@@ -470,25 +479,16 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                       </ul>
                     </>
                   ) : null}
-
-                  {distinctDimensions.length ? (
-                    <>
-                      <h3>How those snippets were generalized</h3>
-                      <ul>
-                        {distinctDimensions.map((dimension) => (
-                          <li key={dimension}>{dimension}</li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
                 </div>
               </div>
             ) : null}
 
-            <article className="pattern-overview expanded">
-              <p className="subtle-label">State of affairs</p>
-              <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
-            </article>
+            {!showMemoryInspector ? (
+              <article className="pattern-overview expanded">
+                <p className="subtle-label">State of affairs</p>
+                <ReactMarkdown>{cleanDisplayText(selectedPattern.overview)}</ReactMarkdown>
+              </article>
+            ) : null}
 
             <div className="pattern-detail-grid simplified">
               {detailNarrative.length ? (

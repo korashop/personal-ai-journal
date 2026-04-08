@@ -1567,7 +1567,7 @@ function buildOverviewFromCluster(title, entryCount, familyKey, evidence) {
             : `${title} is present in this entry, but the underlying shape is still emerging.`);
     return cleanTruncatedEnding(intro) || title;
 }
-function sanitizePatternOverviewText(text) {
+export function sanitizePatternOverviewText(text) {
     const cleaned = cleanTruncatedEnding(text)
         .replace(/\bRecent evidence:\s*.+$/i, '')
         .replace(/\bExample:\s*.+$/i, '')
@@ -1864,11 +1864,12 @@ function scoreThemeWeightFromEvidence(pattern) {
     return Math.min(10, Math.round(average * 10 + chargeBoost));
 }
 function buildThemeRankMetadata(pattern) {
+    const overview = sanitizePatternOverviewText(pattern.overview);
     const recurrence = pattern.entryIds.length >= 6 ? 10 :
         pattern.entryIds.length >= 4 ? 8 :
             pattern.entryIds.length >= 2 ? 6 :
                 2;
-    const coherence = Math.max(2, scoreThemeCoherence(pattern.title, pattern.overview, pattern.dimensions) * 2);
+    const coherence = Math.max(2, scoreThemeCoherence(pattern.title, overview, pattern.dimensions) * 2);
     const weight = scoreThemeWeightFromEvidence(pattern);
     const freshness = scoreThemeFreshness(pattern);
     const rankScore = Number((recurrence * 0.34 + coherence * 0.2 + weight * 0.28 + freshness * 0.18).toFixed(2));
@@ -1890,15 +1891,16 @@ function buildThemeRankMetadata(pattern) {
         pattern.supportingEvidence?.[0]?.claim ?? '',
         pattern.supportingEvidence?.[1]?.claim ?? '',
         pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
-    ].filter(Boolean), pattern.overview).slice(0, 3);
+    ].filter(Boolean), overview).slice(0, 3);
     const detailNarrative = dedupePatternLines([
         pattern.supportingEvidence?.[0]?.claim ?? '',
         pattern.supportingEvidence?.[1]?.claim ?? '',
         pattern.supportingEvidence?.[0]?.whyItMatters ?? '',
         pattern.supportingEvidence?.[1]?.whyItMatters ?? '',
-    ].filter(Boolean), pattern.overview).slice(0, 3);
+    ].filter(Boolean), overview).slice(0, 3);
     return {
         ...pattern,
+        overview,
         prominence,
         rankScore,
         rankFactors: {
