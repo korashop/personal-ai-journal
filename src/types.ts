@@ -142,7 +142,7 @@ export type PatternReplyPayload = {
   patterns?: PatternSection[]
 }
 
-export type PatternsUpdatePayload = {
+export type CompanionReplyPayload = {
   answer: string
 }
 

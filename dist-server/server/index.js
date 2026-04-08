@@ -98,7 +98,7 @@ const patternReplySchema = z.object({
     content: z.string().min(1),
     userId: z.string().optional(),
 });
-const patternsUpdateSchema = z.object({
+const companionReplySchema = z.object({
     content: z.string().optional(),
     thread: z.array(z.object({
         role: z.enum(['user', 'assistant']),
@@ -473,9 +473,9 @@ app.post('/api/patterns/reply', async (request, response, next) => {
         next(error);
     }
 });
-app.post('/api/patterns/update', async (request, response, next) => {
+async function handleCompanionReply(request, response, next) {
     try {
-        const parsed = patternsUpdateSchema.parse(request.body);
+        const parsed = companionReplySchema.parse(request.body);
         const userId = parsed.userId ?? config.demoUserId;
         const { store } = getStore();
         const bootstrap = await store.getBootstrap(userId);
@@ -485,7 +485,9 @@ app.post('/api/patterns/update', async (request, response, next) => {
     catch (error) {
         next(error);
     }
-});
+}
+app.post('/api/patterns/update', handleCompanionReply);
+app.post('/api/companion/reply', handleCompanionReply);
 app.use((error, _request, response, next) => {
     void next;
     const message = error instanceof Error ? error.message : 'Something went wrong';

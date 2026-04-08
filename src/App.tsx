@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookMarked, BrainCircuit, PenLine, RefreshCw, TriangleAlert } from 'lucide-react'
+import { BookMarked, BrainCircuit, MessageSquareText, PenLine, RefreshCw, TriangleAlert } from 'lucide-react'
 
+import { CompanionView } from './components/CompanionView'
 import { EntryComposer } from './components/EntryComposer'
 import { EntryDetail } from './components/EntryDetail'
 import { EntryFeed } from './components/EntryFeed'
@@ -16,7 +17,7 @@ import {
 } from './lib/api'
 import type { EntryListItem, EntryRecord, JournalBootstrap } from './types'
 
-type ViewMode = 'capture' | 'entries' | 'patterns'
+type ViewMode = 'capture' | 'entries' | 'patterns' | 'chat'
 
 function sortEntries(entries: EntryListItem[]) {
   return [...entries].sort(
@@ -221,6 +222,10 @@ export default function App() {
             <BrainCircuit size={16} />
             Patterns
           </button>
+          <button className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')} type="button">
+            <MessageSquareText size={16} />
+            Chat
+          </button>
         </nav>
 
         <button className="ghost-button" disabled={busy} onClick={() => void handleRefresh()} type="button">
@@ -289,6 +294,12 @@ export default function App() {
                 await loadBootstrap(null, { preserveSelection: true })
               }}
               patterns={bootstrap.patterns}
+            />
+          ) : null}
+
+          {view === 'chat' ? (
+            <CompanionView
+              patternsBrief={bootstrap.patternsBrief}
             />
           ) : null}
         </main>

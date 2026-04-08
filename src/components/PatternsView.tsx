@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, LoaderCircle, MessageSquareText, Send, Sparkles
 import ReactMarkdown from 'react-markdown'
 import type { FormEvent } from 'react'
 
-import { createPatternReply, createPatternsUpdate } from '../lib/api'
+import { createCompanionReply, createPatternReply } from '../lib/api'
 import type { EntryListItem, MemoryDocument, PatternSection, PatternsBrief } from '../types'
 
 function statusLabel(status: PatternSection['status']) {
@@ -316,7 +316,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     try {
       setBriefBusy(true)
       await onGenerateBrief()
-      const response = await createPatternsUpdate()
+      const response = await createCompanionReply()
       setUpdateThread([
         {
           id: `patterns-update-assistant-${Date.now()}`,
@@ -357,7 +357,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
       ])
       setUpdateMessage('')
 
-      const response = await createPatternsUpdate({
+      const response = await createCompanionReply({
         content: question,
         thread: [...updateThread, {
           role: 'user' as const,

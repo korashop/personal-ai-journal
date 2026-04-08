@@ -1445,6 +1445,66 @@ button {
   gap: 12px;
 }
 
+.companion-shell {
+  width: 100%;
+}
+
+.companion-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.companion-header {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.companion-summary {
+  margin: 4px 0 0;
+  max-width: 70ch;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.companion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.companion-empty {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.companion-empty strong,
+.companion-empty p {
+  display: block;
+}
+
+.companion-empty p {
+  margin: 6px 0 0;
+}
+
+.companion-starters {
+  gap: 10px;
+}
+
+.companion-thread {
+  min-height: 220px;
+}
+
+.companion-chat {
+  margin-top: 0;
+}
+
 .pattern-chat {
   margin-top: 8px;
 }
@@ -1739,5 +1799,11 @@ button {
   .pattern-chat .primary-button {
     align-self: stretch;
     justify-content: center;
+  }
+
+  .companion-actions,
+  .companion-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

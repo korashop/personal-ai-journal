@@ -1,12 +1,12 @@
 import type {
   CreateConversationPayload,
+  CompanionReplyPayload,
   CreateEntryPayload,
   EntryRecord,
   JournalBootstrap,
   PhotoTranscriptionPayload,
   PatternReplyPayload,
   PatternSection,
-  PatternsUpdatePayload,
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -149,11 +149,11 @@ export async function createPatternReply(pattern: PatternSection, content: strin
   return parseResponse<PatternReplyPayload>(response)
 }
 
-export async function createPatternsUpdate(payload?: {
+export async function createCompanionReply(payload?: {
   content?: string
   thread?: Array<{ role: 'user' | 'assistant'; content: string }>
-}): Promise<PatternsUpdatePayload> {
-  const response = await fetch(apiUrl('/api/patterns/update'), {
+}): Promise<CompanionReplyPayload> {
+  const response = await fetch(apiUrl('/api/companion/reply'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -161,7 +161,7 @@ export async function createPatternsUpdate(payload?: {
     body: JSON.stringify(payload ?? {}),
   })
 
-  return parseResponse<PatternsUpdatePayload>(response)
+  return parseResponse<CompanionReplyPayload>(response)
 }
 
 export async function transcribePhotos(photos: File[]): Promise<PhotoTranscriptionPayload> {

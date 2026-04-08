@@ -129,7 +129,7 @@ export type PatternReplyPayload = {
     memoryDoc?: MemoryDocument | null;
     patterns?: PatternSection[];
 };
-export type PatternsUpdatePayload = {
+export type CompanionReplyPayload = {
     answer: string;
 };
 export type ResurfacingCard = {
