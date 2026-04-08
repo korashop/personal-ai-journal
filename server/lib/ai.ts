@@ -2436,13 +2436,61 @@ function patternFamilyKey(pattern: PatternSection) {
   return themeFamilyForText(`${pattern.title} ${pattern.overview} ${(pattern.dimensions ?? []).join(' ')}`)?.key ?? null
 }
 
-function buildBriefInteractionSummary(patterns: PatternSection[]) {
+function buildStateOfAffairsLine(pattern: PatternSection) {
+  const familyKey = patternFamilyKey(pattern)
+
+  if (familyKey === 'outward-proof') {
+    return 'You keep checking other people\'s desire, attention, or status for proof that your own desire is legitimate'
+  }
+
+  if (familyKey === 'output-anchor') {
+    return 'Making something concrete is carrying more than productivity here; it is tied to whether the day feels real or merely consumed'
+  }
+
+  if (familyKey === 'collaboration-threshold') {
+    return 'The next stretch seems less about pushing harder alone and more about finding the right collaborator, structure, or shared ownership'
+  }
+
+  if (familyKey === 'depth-craft') {
+    return 'Broad motion still seems to be competing with a stronger wish for depth, craft, and sustained immersion'
+  }
+
+  if (familyKey === 'certainty-delay') {
+    return 'Visible movement still waits for more certainty than the situation can probably provide in advance'
+  }
+
+  if (familyKey === 'self-authorization') {
+    return 'Naming what you want still seems tangled up with needing to feel justified, capable, or allowed first'
+  }
+
+  if (familyKey === 'family-mission') {
+    return 'Family is showing up less as a someday wish and more as a direction that could organize present-day choices'
+  }
+
+  if (familyKey === 'alignment-drift') {
+    return 'You seem to be measuring life against a more aligned way of living and noticing the gap with unusual clarity'
+  }
+
+  if (familyKey === 'relationship-attunement') {
+    return 'Generic closeness does not seem sufficient; you want something more specifically felt, expressive, and attuned'
+  }
+
+  if (familyKey === 'physical-pull') {
+    return 'There is a real pull toward more embodied or physical forms of making, not just more thinking'
+  }
+
+  if (familyKey === 'missed-window') {
+    return 'Some energy is still caught in older timing decisions and what they seem to say about your life now'
+  }
+
+  return clipAtWord(lowerCaseFirst(buildBriefWhyNow(pattern)), 150)
+}
+
+function buildLifeLevelInteraction(patterns: PatternSection[]) {
   const lead = patterns[0]
   const second = patterns[1]
   if (!lead) return ''
-  if (!second) {
-    return `The clearest live thread right now is ${lowerCaseFirst(lead.title)}, especially around ${lowerCaseFirst(buildBriefWhyNow(lead))}`
-  }
+  if (!second) return ''
 
   const leadKey = patternFamilyKey(lead)
   const secondKey = patternFamilyKey(second)
@@ -2472,25 +2520,7 @@ function buildBriefInteractionSummary(patterns: PatternSection[]) {
     return 'Family is showing up less as an abstract future wish and more as an organizing direction, while the journal keeps testing how to build toward it without losing alignment'
   }
 
-  return `${lead.title} feels most live, while ${lowerCaseFirst(second.title)} is shaping how that theme is actually being carried or delayed`
-}
-
-function buildBriefTensions(patterns: PatternSection[]) {
-  const sourcePatterns = patterns.slice(0, 3)
-  const lead = sourcePatterns[0]
-  const second = sourcePatterns[1]
-  const third = sourcePatterns[2]
-  const notes: string[] = []
-
-  if (lead && second) {
-    notes.push(buildBriefInteractionSummary([lead, second]))
-  }
-
-  if (third) {
-    notes.push(`${third.title} still feels live in the background, which is part of the current texture rather than a separate story`)
-  }
-
-  return dedupePatternLines(notes).slice(0, 2)
+  return ''
 }
 
 export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
@@ -2511,18 +2541,16 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
     )
     .slice(0, 1)
 
-  const summary =
-    sourcePatterns.length >= 3
-      ? `The map is currently centering on ${sourcePatterns[0].title}, with ${sourcePatterns[1].title} and ${sourcePatterns[2].title} also staying live.`
-      : sourcePatterns.length === 2
-        ? `The map is currently centering on ${sourcePatterns[0].title}, with ${sourcePatterns[1].title} also staying live.`
-        : `The clearest live thread right now is ${sourcePatterns[0].title}.`
-  const followUp = buildBriefTensions(sourcePatterns)[0] ?? buildBriefWhyNow(sourcePatterns[0])
+  const bullets = dedupePatternLines([
+    buildStateOfAffairsLine(sourcePatterns[0]),
+    buildStateOfAffairsLine(sourcePatterns[1] ?? sourcePatterns[0]),
+    buildLifeLevelInteraction(sourcePatterns),
+    buildStateOfAffairsLine(sourcePatterns[2] ?? sourcePatterns[1] ?? sourcePatterns[0]),
+  ]).slice(0, 3)
 
   return {
-    title: 'Current read',
-    summary,
-    followUp,
+    title: 'State of affairs',
+    bullets,
     prompt: prompts[0] ?? null,
   }
 }

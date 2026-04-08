@@ -140,8 +140,7 @@ export type PatternSection = {
 
 export type PatternsBrief = {
   title: string
-  summary: string
-  followUp?: string
+  bullets: string[]
   prompt?: {
     patternId: string
     text: string

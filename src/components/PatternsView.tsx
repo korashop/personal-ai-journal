@@ -390,19 +390,21 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   <section className="pattern-brief-card">
                     <div className="pattern-brief-header">
                       <p className="subtle-label">{patternsBrief.title}</p>
-                      <h3>{patternsBrief.summary}</h3>
                     </div>
 
-                    {patternsBrief.followUp ? (
+                    {patternsBrief.bullets.length ? (
                       <div className="pattern-brief-section">
-                        <p className="subtle-label">What seems most important here</p>
-                        <p className="pattern-brief-followup">{patternsBrief.followUp}</p>
+                        <ul className="pattern-brief-list">
+                          {patternsBrief.bullets.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
                       </div>
                     ) : null}
 
                     {briefPrompt ? (
                       <div className="pattern-brief-prompts">
-                        <p className="subtle-label">Try asking</p>
+                        <p className="subtle-label">Worth asking</p>
                         <button
                           className="option-chip option-chip-inline"
                           onClick={() => openPattern(briefPrompt.patternId, briefPrompt.text)}

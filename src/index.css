@@ -1136,20 +1136,7 @@ button {
 .pattern-brief-header {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.pattern-brief-header h3 {
-  margin: 0;
-  font-size: 1.35rem;
-  line-height: 1.35;
-}
-
-.pattern-brief-meta {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.65;
-  max-width: 72ch;
+  gap: 4px;
 }
 
 .pattern-brief-section,
@@ -1159,15 +1146,23 @@ button {
   gap: 8px;
 }
 
-.pattern-brief-followup {
+.option-chip-inline {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.pattern-brief-list {
   margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   color: var(--text);
   line-height: 1.65;
 }
 
-.option-chip-inline {
-  width: fit-content;
-  max-width: 100%;
+.pattern-brief-list li {
+  padding-left: 2px;
 }
 
 .pattern-tier-section {
