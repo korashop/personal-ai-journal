@@ -141,6 +141,13 @@ export type PatternSection = {
 export type PatternsBrief = {
   title: string
   bullets: string[]
+  expandedOverview?: {
+    summary: string
+    sections: Array<{
+      title: string
+      lines: string[]
+    }>
+  } | null
   prompt?: {
     patternId: string
     text: string

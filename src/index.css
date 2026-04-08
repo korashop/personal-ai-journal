@@ -1133,6 +1133,13 @@ button {
     rgba(255, 255, 255, 0.03);
 }
 
+.pattern-brief-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .pattern-brief-header {
   display: flex;
   flex-direction: column;
@@ -1146,9 +1153,44 @@ button {
   gap: 8px;
 }
 
+.brief-toggle-button {
+  align-self: flex-start;
+}
+
 .option-chip-inline {
   width: fit-content;
   max-width: 100%;
+}
+
+.pattern-brief-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pattern-brief-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+  max-width: 78ch;
+}
+
+.pattern-brief-expanded-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.pattern-brief-expanded-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .pattern-brief-list {
@@ -1163,6 +1205,10 @@ button {
 
 .pattern-brief-list li {
   padding-left: 2px;
+}
+
+.pattern-brief-list.compact {
+  gap: 8px;
 }
 
 .pattern-tier-section {
@@ -1565,6 +1611,15 @@ button {
 
   .pattern-home-stack {
     gap: 22px;
+  }
+
+  .pattern-brief-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pattern-brief-expanded-sections {
+    grid-template-columns: 1fr;
   }
 
   .pattern-home-summary {

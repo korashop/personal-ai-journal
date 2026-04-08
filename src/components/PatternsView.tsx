@@ -95,6 +95,7 @@ type ThemeMessage = {
 export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, patterns, patternsBrief }: PatternsViewProps) {
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null)
   const [showMemoryInspector, setShowMemoryInspector] = useState(false)
+  const [showExpandedBrief, setShowExpandedBrief] = useState(false)
   const [showChatPanel, setShowChatPanel] = useState(true)
   const [message, setMessage] = useState('')
   const [themeThreads, setThemeThreads] = useState<Record<string, ThemeMessage[]>>({})
@@ -135,6 +136,10 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
   useEffect(() => {
     setShowChatPanel(true)
   }, [selectedPatternId])
+
+  useEffect(() => {
+    setShowExpandedBrief(false)
+  }, [patternsBrief?.bullets, patternsBrief?.expandedOverview?.summary])
 
   useEffect(() => {
     if ((patterns.length > 5 && !patterns.some(patternLooksPlaceholder)) || entries.length < 10) {
@@ -388,8 +393,20 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
               <div className="pattern-home-stack">
                 {patternsBrief ? (
                   <section className="pattern-brief-card">
-                    <div className="pattern-brief-header">
-                      <p className="subtle-label">{patternsBrief.title}</p>
+                    <div className="pattern-brief-topbar">
+                      <div className="pattern-brief-header">
+                        <p className="subtle-label">{patternsBrief.title}</p>
+                      </div>
+                      {patternsBrief.expandedOverview ? (
+                        <button
+                          className="ghost-button brief-toggle-button"
+                          onClick={() => setShowExpandedBrief((current) => !current)}
+                          type="button"
+                        >
+                          {showExpandedBrief ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          {showExpandedBrief ? 'Hide overview' : 'Expand overview'}
+                        </button>
+                      ) : null}
                     </div>
 
                     {patternsBrief.bullets.length ? (
@@ -399,6 +416,27 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                             <li key={line}>{line}</li>
                           ))}
                         </ul>
+                      </div>
+                    ) : null}
+
+                    {showExpandedBrief && patternsBrief.expandedOverview ? (
+                      <div className="pattern-brief-expanded">
+                        {patternsBrief.expandedOverview.summary ? (
+                          <p className="pattern-brief-summary">{patternsBrief.expandedOverview.summary}</p>
+                        ) : null}
+
+                        <div className="pattern-brief-expanded-sections">
+                          {patternsBrief.expandedOverview.sections.map((section) => (
+                            <section className="pattern-brief-expanded-section" key={section.title}>
+                              <p className="subtle-label">{section.title}</p>
+                              <ul className="pattern-brief-list compact">
+                                {section.lines.map((line) => (
+                                  <li key={line}>{line}</li>
+                                ))}
+                              </ul>
+                            </section>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
 

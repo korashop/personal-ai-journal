@@ -2596,6 +2596,58 @@ function buildLifeLevelInteraction(patterns: PatternSection[]) {
   return ''
 }
 
+function buildExpandedBriefOverview(
+  durablePattern: PatternSection | null,
+  recentPattern: PatternSection | null,
+  bridgePattern: PatternSection | null,
+  prompt: { patternId: string; text: string } | null,
+) {
+  const summary = dedupePatternLines([
+    buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern): pattern is PatternSection => Boolean(pattern))),
+    durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
+    recentPattern ? buildRecentStateLine(recentPattern) : '',
+  ]).slice(0, 2).join(' ')
+
+  const stableLines = dedupePatternLines([
+    durablePattern ? buildStateOfAffairsLine(durablePattern) : '',
+    bridgePattern && bridgePattern.id !== durablePattern?.id ? buildStateOfAffairsLine(bridgePattern) : '',
+  ]).slice(0, 2)
+
+  const recentLines = dedupePatternLines([
+    recentPattern ? buildRecentStateLine(recentPattern) : '',
+    recentPattern?.changeSummary?.[0] ?? '',
+    recentPattern?.supportingEvidence?.[0]?.claim ?? '',
+  ]).slice(0, 2)
+
+  const nextLines = dedupePatternLines([
+    buildLifeLevelInteraction([durablePattern, recentPattern].filter((pattern): pattern is PatternSection => Boolean(pattern))),
+    prompt?.text ?? '',
+    bridgePattern && bridgePattern.id !== durablePattern?.id ? buildStateOfAffairsLine(bridgePattern) : '',
+  ]).slice(0, 2)
+
+  const sections = [
+    {
+      title: 'More stable undercurrents',
+      lines: stableLines,
+    },
+    {
+      title: 'What has felt more alive lately',
+      lines: recentLines,
+    },
+    {
+      title: 'What this may be asking',
+      lines: nextLines,
+    },
+  ].filter((section) => section.lines.length)
+
+  if (!summary && !sections.length) return null
+
+  return {
+    summary,
+    sections,
+  }
+}
+
 export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
   if (!patterns.length) return null
 
@@ -2642,10 +2694,13 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
     bridgePattern ? buildStateOfAffairsLine(bridgePattern) : '',
   ]).slice(0, 3)
 
+  const prompt = prompts[0] ?? null
+
   return {
     title: 'State of affairs',
     bullets,
-    prompt: prompts[0] ?? null,
+    expandedOverview: buildExpandedBriefOverview(durablePattern, recentPattern, bridgePattern, prompt),
+    prompt,
   }
 }
 
