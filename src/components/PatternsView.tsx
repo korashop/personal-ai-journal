@@ -22,12 +22,6 @@ function statusNote(pattern: PatternSection) {
   return 'This theme seems durable enough to keep tracking over time.'
 }
 
-function prominenceLabel(pattern: PatternSection) {
-  if (pattern.prominence === 'dominant') return 'Dominant right now'
-  if (pattern.prominence === 'quiet' || pattern.entryCount <= 1) return 'Quiet signal'
-  return 'Active thread'
-}
-
 function patternLooksPlaceholder(pattern: PatternSection) {
   return (
     /\bis present in this entry, but the underlying shape is still emerging\b/i.test(pattern.overview) ||
@@ -219,7 +213,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
         `${cleanDisplayText(selectedPattern?.overview ?? '')}\n${(selectedPattern?.detailNarrative ?? selectedPattern?.themeSummary ?? [])
           .map(cleanDisplayText)
           .join('\n')}`,
-      ),
+      ).slice(0, 2),
     [selectedPattern],
   )
 
@@ -228,7 +222,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
       filterDistinctLines(
         (selectedPattern?.detailNarrative ?? selectedPattern?.themeSummary ?? []).map(cleanDisplayText),
         cleanDisplayText(selectedPattern?.overview ?? ''),
-      ).slice(0, 3),
+      ).slice(0, 2),
     [selectedPattern],
   )
 
@@ -248,7 +242,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
         `${cleanDisplayText(selectedPattern?.overview ?? '')}\n${(selectedPattern?.dimensions ?? [])
           .map(cleanDisplayText)
           .join('\n')}`,
-      ),
+      ).slice(0, 2),
     [selectedPattern],
   )
 
@@ -260,20 +254,17 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     return [
       {
         id: 'dominant',
-        title: 'Dominant right now',
-        summary: 'The themes with the strongest mix of recurrence, coherence, and live charge.',
+        title: 'Most live right now',
         patterns: dominant,
       },
       {
         id: 'supporting',
-        title: 'Active undercurrents',
-        summary: 'Meaningful threads that are present, but not carrying the whole dashboard.',
+        title: dominant.length ? 'Active undercurrents' : 'Themes in play',
         patterns: supporting,
       },
       {
         id: 'quiet',
-        title: 'Quiet signals',
-        summary: 'Early or more specific themes worth keeping in the map without over-promoting them.',
+        title: 'Quieter signals',
         patterns: quiet,
       },
     ].filter((group) => group.patterns.length)
@@ -283,9 +274,9 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     () =>
       filterDistinctLines(
         [
-          ...(patternsBrief?.prompts
-            .filter((prompt) => prompt.patternId === selectedPattern?.id)
-            .map((prompt) => cleanDisplayText(prompt.text)) ?? []),
+          ...(patternsBrief?.prompt && patternsBrief.prompt.patternId === selectedPattern?.id
+            ? [cleanDisplayText(patternsBrief.prompt.text)]
+            : []),
           ...(selectedPattern?.changeSummary?.length ? ['What changed recently here?'] : []),
           selectedPattern?.questions[0] ? cleanDisplayText(selectedPattern.questions[0]) : '',
           selectedPattern?.exploreOptions[0] ? cleanDisplayText(selectedPattern.exploreOptions[0]) : '',
@@ -293,8 +284,8 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
           'What evidence would make this theme less true?',
         ].filter(Boolean),
         cleanDisplayText(selectedPattern?.overview ?? ''),
-      ).slice(0, 4),
-    [patternsBrief?.prompts, selectedPattern],
+      ).slice(0, 3),
+    [patternsBrief?.prompt, selectedPattern],
   )
 
   function openPattern(patternId: string, nextMessage?: string) {
@@ -372,6 +363,8 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
     )
   }
 
+  const briefPrompt = patternsBrief?.prompt ?? null
+
   return (
     <section className={`patterns-shell ${selectedPattern ? 'detail-mode' : 'home-mode'}`}>
       {selectedPattern ? (
@@ -398,50 +391,26 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                     <div className="pattern-brief-header">
                       <p className="subtle-label">{patternsBrief.title}</p>
                       <h3>{patternsBrief.summary}</h3>
-                      <p className="pattern-brief-meta">
-                        {patternsBrief.surfacedCount} live theme{patternsBrief.surfacedCount === 1 ? '' : 's'} surfaced right now.
-                        {patternsBrief.quietCount ? ` ${patternsBrief.quietCount} of them are still quieter or earlier signals.` : ''}
-                      </p>
                     </div>
 
-                    {patternsBrief.currentState.length ? (
+                    {patternsBrief.followUp ? (
                       <div className="pattern-brief-section">
-                        <p className="subtle-label">What seems most live</p>
-                        <ul className="pattern-brief-list">
-                          {patternsBrief.currentState.map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
+                        <p className="subtle-label">What seems most important here</p>
+                        <p className="pattern-brief-followup">{patternsBrief.followUp}</p>
                       </div>
                     ) : null}
 
-                    {patternsBrief.tensions.length ? (
-                      <div className="pattern-brief-section">
-                        <p className="subtle-label">What may be interacting</p>
-                        <ul className="pattern-brief-list">
-                          {patternsBrief.tensions.map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-
-                    {patternsBrief.prompts.length ? (
+                    {briefPrompt ? (
                       <div className="pattern-brief-prompts">
                         <p className="subtle-label">Try asking</p>
-                        <div className="explore-options">
-                          {patternsBrief.prompts.map((prompt) => (
-                            <button
-                              className="option-chip"
-                              key={`${prompt.patternId}-${prompt.text}`}
-                              onClick={() => openPattern(prompt.patternId, prompt.text)}
-                              type="button"
-                            >
-                              <Sparkles size={14} />
-                              {prompt.text}
-                            </button>
-                          ))}
-                        </div>
+                        <button
+                          className="option-chip option-chip-inline"
+                          onClick={() => openPattern(briefPrompt.patternId, briefPrompt.text)}
+                          type="button"
+                        >
+                          <Sparkles size={14} />
+                          {briefPrompt.text}
+                        </button>
                       </div>
                     ) : null}
                   </section>
@@ -451,7 +420,6 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   <section className="pattern-tier-section" key={group.id}>
                   <div className="pattern-tier-header">
                     <p className="subtle-label">{group.title}</p>
-                    <p className="pattern-tier-summary">{group.summary}</p>
                   </div>
                   <div className="pattern-home-list">
                     {group.patterns.map((pattern) => {
@@ -466,11 +434,7 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                             <strong>{pattern.title}</strong>
                             <span className={`pattern-status ${pattern.status}`}>{statusLabel(pattern.status)}</span>
                           </div>
-                          <p className="pattern-prominence-copy">{prominenceLabel(pattern)}</p>
-                          <p className="pattern-home-preview">{shortDisplayText(pattern.overview, 170)}</p>
-                          {pattern.changeSummary?.[0] ? (
-                            <p className="pattern-home-shift">{shortDisplayText(pattern.changeSummary[0], 120)}</p>
-                          ) : null}
+                          <p className="pattern-home-preview">{shortDisplayText(pattern.overview, 132)}</p>
                           <small>{pattern.entryCount} related entr{pattern.entryCount === 1 ? 'y' : 'ies'}</small>
                         </button>
                       )
@@ -658,7 +622,6 @@ export function PatternsView({ entries, onOpenEntry, onRefreshAfterThemeReply, p
                   {engagementPrompts.length ? (
                     <div className="pattern-explore">
                       <p className="subtle-label">Ways to engage</p>
-                      <p className="hint">Tap one to drop it into the chat box, then edit or send it.</p>
                       <div className="explore-options stacked">
                         {engagementPrompts.map((option) => (
                           <button className="option-chip" key={option} onClick={() => setMessage(option)} type="button">

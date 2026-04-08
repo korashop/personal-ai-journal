@@ -128,14 +128,11 @@ export type PatternSection = {
 export type PatternsBrief = {
     title: string;
     summary: string;
-    currentState: string[];
-    tensions: string[];
-    prompts: Array<{
+    followUp?: string;
+    prompt?: {
         patternId: string;
         text: string;
-    }>;
-    surfacedCount: number;
-    quietCount: number;
+    } | null;
 };
 export type JournalBootstrapRecord = {
     entries: EntryListRecord[];

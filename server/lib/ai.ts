@@ -2501,10 +2501,6 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
   const sourcePatterns = focusPatterns.length ? focusPatterns : sorted.slice(0, 3)
   if (!sourcePatterns.length) return null
 
-  const currentState = dedupePatternLines(
-    sourcePatterns.map((pattern) => buildBriefWhyNow(pattern)),
-  ).slice(0, 3)
-
   const prompts = sourcePatterns
     .map((pattern) => ({
       patternId: pattern.id,
@@ -2513,26 +2509,21 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
     .filter((prompt, index, items) =>
       items.findIndex((candidate) => normalizeWhitespace(candidate.text).toLowerCase() === normalizeWhitespace(prompt.text).toLowerCase()) === index,
     )
-    .slice(0, 3)
+    .slice(0, 1)
 
-  const surfacedCount = patterns.length
-  const quietCount = patterns.filter((pattern) => pattern.prominence === 'quiet' || pattern.entryCount <= 1).length
   const summary =
     sourcePatterns.length >= 3
       ? `The map is currently centering on ${sourcePatterns[0].title}, with ${sourcePatterns[1].title} and ${sourcePatterns[2].title} also staying live.`
       : sourcePatterns.length === 2
         ? `The map is currently centering on ${sourcePatterns[0].title}, with ${sourcePatterns[1].title} also staying live.`
         : `The clearest live thread right now is ${sourcePatterns[0].title}.`
-  const tensions = buildBriefTensions(sourcePatterns)
+  const followUp = buildBriefTensions(sourcePatterns)[0] ?? buildBriefWhyNow(sourcePatterns[0])
 
   return {
     title: 'Current read',
     summary,
-    currentState,
-    tensions,
-    prompts,
-    surfacedCount,
-    quietCount,
+    followUp,
+    prompt: prompts[0] ?? null,
   }
 }
 
