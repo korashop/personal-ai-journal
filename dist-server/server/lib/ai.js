@@ -921,48 +921,104 @@ const THEME_FAMILIES = [
         ],
     },
 ];
+function keywordHitCount(text, patterns) {
+    const cleaned = normalizeWhitespace(stripMarkdown(text)).toLowerCase();
+    return patterns.reduce((count, pattern) => count + (pattern.test(cleaned) ? 1 : 0), 0);
+}
+function familyCueScore(familyKey, text) {
+    const cueSets = {
+        'self-authorization': [/\bpermission\b/, /\ballowed\b/, /\bentitled\b/, /\bask(?:ing)?\b/, /\breach out\b/, /\bjustify\b/, /\bqualified\b/, /\bcapab/i],
+        'outward-proof': [/\badmired\b/, /\bvalidation\b/, /\bproof\b/, /\bauthority\b/, /\bsomeone else\b/, /\brecognized\b/, /\bstatus\b/, /\battention\b/],
+        'certainty-delay': [/\bwait(?:ing)?\b/, /\bdelay(?:ed|ing)?\b/, /\bhesitat/i, /\breadiness\b/, /\bclarity\b/, /\bbefore\b/, /\blater\b/, /\bcertainty\b/],
+        'missed-window': [/\bregret\b/, /\bmissed\b/, /\bearlier\b/, /\bwindow\b/, /\b8 years?\b/, /\b5 years?\b/, /\btoo long\b/, /\btiming\b/],
+        'collaboration-threshold': [/\bcollaborat/i, /\bhire\b/, /\bteam\b/, /\bpartner\b/, /\bownership\b/, /\bwho not how\b/, /\bincentivize\b/, /\bshared\b/],
+        'output-anchor': [/\boutput\b/, /\bship(?:ping|ped)?\b/, /\bproduce|producing|production\b/, /\bconsum(?:e|ing|ption)\b/, /\bshow for them\b/, /\bshow for it\b/, /\bmake the day feel\b/, /\bday feel real\b/],
+        'depth-craft': [/\bdepth\b/, /\bcraft\b/, /\bshallow\b/, /\bimmers/i, /\bbroad\b/, /\bpassion\b/, /\btaste\b/, /\bcuration\b/],
+        'family-mission': [/\bfamily\b/, /\bmission\b/, /\borganize your life\b/, /\bbuild toward\b/, /\blife orient/i, /\bsurrender\b/],
+        'alignment-drift': [/\balignment\b/, /\bsurrender\b/, /\bmisaligned?\b/, /\bdeliberately\b/, /\bhonest\b/],
+        'relationship-attunement': [/\battun/i, /\bseen\b/, /\blove\b/, /\bpartner\b/, /\bcloseness\b/, /\brelationship\b/],
+        'physical-pull': [/\bphysical\b/, /\bbody\b/, /\bembodied\b/, /\bcollage\b/, /\bsport\b/, /\bcoach\b/],
+    };
+    const matches = keywordHitCount(text, cueSets[familyKey] ?? []);
+    if (familyKey === 'certainty-delay') {
+        const permissionCount = keywordHitCount(text, [/\bpermission\b/, /\ballowed\b/, /\bentitled\b/, /\bjustify\b/]);
+        const regretCount = keywordHitCount(text, [/\bregret\b/, /\bmissed\b/, /\bearlier\b/, /\bwindow\b/]);
+        return matches - permissionCount * 0.8 - regretCount * 0.6;
+    }
+    if (familyKey === 'self-authorization') {
+        const outwardCount = keywordHitCount(text, [/\badmired\b/, /\bvalidation\b/, /\bauthority\b/, /\bsomeone else\b/]);
+        return matches - outwardCount * 0.7;
+    }
+    if (familyKey === 'outward-proof') {
+        const permissionCount = keywordHitCount(text, [/\bpermission\b/, /\ballowed\b/, /\bentitled\b/]);
+        return matches - permissionCount * 0.5;
+    }
+    if (familyKey === 'missed-window') {
+        const certaintyCount = keywordHitCount(text, [/\bwait(?:ing)?\b/, /\bcertainty\b/, /\breadiness\b/]);
+        return matches + certaintyCount * 0.2;
+    }
+    return matches;
+}
+function familiesConflict(leftKey, rightKey) {
+    if (!leftKey || !rightKey || leftKey === rightKey)
+        return false;
+    const conflictPairs = new Set([
+        'self-authorization|certainty-delay',
+        'certainty-delay|self-authorization',
+        'self-authorization|outward-proof',
+        'outward-proof|self-authorization',
+        'certainty-delay|missed-window',
+        'missed-window|certainty-delay',
+        'depth-craft|output-anchor',
+        'output-anchor|depth-craft',
+    ]);
+    return conflictPairs.has(`${leftKey}|${rightKey}`);
+}
 function themeFamilyForText(text) {
     const cleaned = `${text}`.trim();
     if (!cleaned)
         return null;
-    const directMatch = THEME_FAMILIES.find((family) => family.test.test(cleaned));
-    if (directMatch)
-        return directMatch;
     const normalizedTokens = semanticTokenSet(cleaned);
-    if (!normalizedTokens.size)
-        return null;
-    const semanticFamilyHits = new Map();
-    for (const token of normalizedTokens) {
-        const familyKey = token === 'authorization' ? 'self-authorization' :
-            token === 'proof' ? 'outward-proof' :
-                token === 'certainty' ? 'certainty-delay' :
-                    token === 'alignment' ? 'alignment-drift' :
-                        token === 'family' ? 'family-mission' :
-                            token === 'depth' ? 'depth-craft' :
-                                token === 'output' ? 'output-anchor' :
-                                    token === 'relationship' ? 'relationship-attunement' :
-                                        token === 'collaboration' ? 'collaboration-threshold' :
-                                            token === 'timing' ? 'missed-window' :
-                                                token === 'physical' ? 'physical-pull' :
-                                                    '';
-        if (familyKey) {
-            semanticFamilyHits.set(familyKey, (semanticFamilyHits.get(familyKey) ?? 0) + 1);
-        }
-    }
-    const strongestSemanticHit = [...semanticFamilyHits.entries()]
-        .sort((left, right) => right[1] - left[1])[0];
-    if (strongestSemanticHit && strongestSemanticHit[1] >= 1) {
-        return THEME_FAMILIES.find((family) => family.key === strongestSemanticHit[0]) ?? null;
-    }
-    const semanticMatches = THEME_FAMILIES
+    const scoredFamilies = THEME_FAMILIES
         .map((family) => {
+        let score = 0;
+        if (family.test.test(cleaned))
+            score += 5;
+        score += familyCueScore(family.key, cleaned) * 1.6;
+        if (normalizedTokens.size) {
+            const semanticTokenHits = [...normalizedTokens].reduce((sum, token) => {
+                const familyKey = token === 'authorization' ? 'self-authorization' :
+                    token === 'proof' ? 'outward-proof' :
+                        token === 'certainty' ? 'certainty-delay' :
+                            token === 'alignment' ? 'alignment-drift' :
+                                token === 'family' ? 'family-mission' :
+                                    token === 'depth' ? 'depth-craft' :
+                                        token === 'output' ? 'output-anchor' :
+                                            token === 'relationship' ? 'relationship-attunement' :
+                                                token === 'collaboration' ? 'collaboration-threshold' :
+                                                    token === 'timing' ? 'missed-window' :
+                                                        token === 'physical' ? 'physical-pull' :
+                                                            '';
+                return sum + (familyKey === family.key ? 1 : 0);
+            }, 0);
+            score += semanticTokenHits * 1.3;
+        }
         const familyAnchor = `${family.title} ${family.questions.join(' ')}`;
-        const score = semanticSimilarity(cleaned, familyAnchor);
+        score += semanticSimilarity(cleaned, familyAnchor) * 4;
         return { family, score };
     })
-        .filter((item) => item.score >= 0.34)
         .sort((left, right) => right.score - left.score);
-    return semanticMatches[0]?.family ?? null;
+    const best = scoredFamilies[0];
+    const second = scoredFamilies[1];
+    if (!best || best.score < 2.4)
+        return null;
+    if (second && best.score - second.score < 0.55 && familiesConflict(best.family.key, second.family.key)) {
+        const bestCue = familyCueScore(best.family.key, cleaned);
+        const secondCue = familyCueScore(second.family.key, cleaned);
+        if (secondCue > bestCue)
+            return second.family;
+    }
+    return best.family;
 }
 function themeCandidateIsSelfConsistent(title, evidence) {
     const titleFamily = themeFamilyForText(title);
@@ -1156,9 +1212,16 @@ function selectPatternEvidenceSnippet(pattern, entry) {
     return cleanTruncatedEnding(familyEvidence || openEvidence || entry.summary || '');
 }
 function scoreThreadMatchToPattern(pattern, thread) {
+    const patternFamily = themeFamilyForText(`${pattern.title} ${pattern.overview}`);
+    const threadFamily = themeFamilyForText(`${thread.label} ${thread.claim} ${thread.snippets.map((item) => item.text).join(' ')}`);
     const titleScore = Math.max(themeTitleSimilarity(pattern.title, thread.label), semanticSimilarity(`${pattern.title} ${pattern.overview}`, `${thread.label} ${thread.claim}`));
     const claimScore = semanticSimilarity(`${pattern.overview} ${pattern.dimensions.join(' ')}`, `${thread.claim} ${thread.whyItMatters}`);
-    return titleScore * 0.6 + claimScore * 0.4 + thread.salience * 0.1;
+    const familyPenalty = patternFamily?.key && threadFamily?.key && familiesConflict(patternFamily.key, threadFamily.key)
+        ? 0.38
+        : patternFamily?.key && threadFamily?.key && patternFamily.key !== threadFamily.key
+            ? 0.18
+            : 0;
+    return titleScore * 0.58 + claimScore * 0.34 + thread.salience * 0.12 - familyPenalty;
 }
 function selectPatternEvidenceDetail(pattern, entry) {
     const matchingThread = buildEntryThreads(entry)
@@ -1231,9 +1294,13 @@ function buildThreadClaim(label, snippet, summary, sectionContent = '') {
     const family = themeFamilyForText(`${label} ${anchor}`);
     const cleanedLabel = simplifyPatternTitle(label);
     const lowerAnchor = anchor.toLowerCase();
+    const quotedAnchor = cleanTruncatedEnding(anchor);
     if (family?.key === 'self-authorization') {
         if (/ask|reach out|permission|allowed|entitled/.test(lowerAnchor)) {
             return formatPatternSentence('The thread is not just wanting something, but needing permission or legitimacy to feel settled before asking for it');
+        }
+        if (/capab|qualified|authority|good at/.test(lowerAnchor)) {
+            return formatPatternSentence('The thread is trying to settle whether you are qualified enough before letting desire move into action');
         }
         return formatPatternSentence('The recurring move is needing legitimacy or capability to feel established before asking directly for what you want');
     }
@@ -1253,6 +1320,9 @@ function buildThreadClaim(label, snippet, summary, sectionContent = '') {
         if (/wait|later|delay|readiness|certainty/.test(lowerAnchor)) {
             return formatPatternSentence('The thread is waiting for enough certainty or readiness before making a move that would actually create more information');
         }
+        if (/why did i wait|too long|later than/i.test(lowerAnchor)) {
+            return formatPatternSentence('The thread is using delay itself as evidence that you should have been more certain before acting');
+        }
         return formatPatternSentence('The thread is postponing visible movement until more certainty appears, then feeling the cost of that delay');
     }
     if (family?.key === 'relationship-attunement') {
@@ -1264,6 +1334,9 @@ function buildThreadClaim(label, snippet, summary, sectionContent = '') {
     if (family?.key === 'collaboration-threshold') {
         if (/solo|alone|collaborator|partner|team|who not how/.test(lowerAnchor)) {
             return formatPatternSentence('The thread is moving from solo effort toward the question of who would actually make the work larger or more real');
+        }
+        if (/hire|incentivize|ownership|shared/.test(lowerAnchor)) {
+            return formatPatternSentence('The thread is getting concrete about what kind of hire, ownership, or shared structure would turn this into a real collaboration problem');
         }
         return formatPatternSentence('The thread is moving from solo effort toward the question of who would actually make the work larger or more real');
     }
@@ -1277,11 +1350,17 @@ function buildThreadClaim(label, snippet, summary, sectionContent = '') {
         if (/depth|craft|shallow|broad|immers/.test(lowerAnchor)) {
             return formatPatternSentence('The thread is pulling toward deeper craft and sustained immersion rather than broad but shallow motion');
         }
+        if (/taste|curation|design|space|experience/.test(lowerAnchor)) {
+            return formatPatternSentence('The thread is not just wanting depth in general, but wanting to exercise taste and craft in a more authored way');
+        }
         return formatPatternSentence('The thread is wanting deeper craft or sustained immersion instead of a broad-but-shallow mode');
     }
     if (family?.key === 'output-anchor') {
         if (/consum|consumed|show for|ship|output|produce/.test(lowerAnchor)) {
             return formatPatternSentence('The thread is using concrete output as a way to make time feel real rather than consumed by circling or intake');
+        }
+        if (/day feel real|meaning to show/.test(lowerAnchor)) {
+            return formatPatternSentence('The thread is measuring whether the day counted by whether there is something real to point to at the end of it');
         }
         return formatPatternSentence('The thread is using concrete output as a way to make time feel real rather than consumed by circling or intake');
     }
@@ -1297,8 +1376,8 @@ function buildThreadClaim(label, snippet, summary, sectionContent = '') {
         }
         return formatPatternSentence('The thread is replaying old timing windows and trying to extract usable signal without turning that into self-punishment');
     }
-    if (anchor && semanticSimilarity(anchor, cleanedLabel) < 0.85) {
-        return formatPatternSentence(`${cleanedLabel}: ${anchor}`);
+    if (quotedAnchor && semanticSimilarity(quotedAnchor, cleanedLabel) < 0.85) {
+        return formatPatternSentence(`${cleanedLabel}: ${lowerCaseFirst(quotedAnchor)}`);
     }
     return formatPatternSentence(cleanedLabel || summary || 'A live thread in this entry');
 }
@@ -2135,8 +2214,6 @@ function selectSupportingEvidenceRows(items, maxItems = 8) {
         if (!item.snippet || evidenceLooksFragmentary(item.snippet))
             continue;
         if (usedEntryIds.has(item.entryId))
-            continue;
-        if (selected.some((existing) => semanticSimilarity(existing.claim ?? '', item.claim ?? '') >= 0.9))
             continue;
         if (selected.some((existing) => textOverlapScore(existing.snippet, item.snippet) >= 0.72))
             continue;
