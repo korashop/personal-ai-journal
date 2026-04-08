@@ -20,6 +20,7 @@ import {
   generatePatternReply,
   generatePatternsUpdate,
   generateReply,
+  integrateCompanionReplyIntoMemory,
   integratePatternReplyIntoMemory,
   inferTags,
   rewriteMemoryDoc,
@@ -246,6 +247,28 @@ function triggerPatternRefreshAfterReply(userId: string, pattern: z.infer<typeof
     await store.updatePatterns(userId, patterns)
   })().catch((error) => {
     console.error('Pattern refresh after reply failed', error)
+  })
+}
+
+function triggerCompanionRefreshAfterReply(userId: string, userMessage: string, answer: string) {
+  void (async () => {
+    const { store } = getStore()
+    const bootstrap = await store.getBootstrap(userId)
+    const previousPatterns = shouldRefreshPatterns(bootstrap.patternEntries.length, bootstrap.patterns)
+      ? []
+      : bootstrap.patterns
+
+    const nextMemory = await integrateCompanionReplyIntoMemory(
+      bootstrap.memoryDoc,
+      userMessage,
+      answer,
+    )
+
+    const memoryDoc = await store.updateMemory(userId, nextMemory)
+    const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, previousPatterns)
+    await store.updatePatterns(userId, patterns)
+  })().catch((error) => {
+    console.error('Companion refresh after reply failed', error)
   })
 }
 
@@ -593,6 +616,9 @@ async function handleCompanionReply(request: express.Request, response: express.
     )
 
     response.json({ answer })
+    if (parsed.content?.trim()) {
+      triggerCompanionRefreshAfterReply(userId, parsed.content.trim(), answer)
+    }
   } catch (error) {
     next(error)
   }

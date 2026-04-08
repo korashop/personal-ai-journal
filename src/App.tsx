@@ -299,6 +299,9 @@ export default function App() {
 
           {view === 'chat' ? (
             <CompanionView
+              onRefreshAfterReply={async () => {
+                await loadBootstrap(null, { preserveSelection: true })
+              }}
               patternsBrief={bootstrap.patternsBrief}
             />
           ) : null}

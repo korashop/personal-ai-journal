@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { attachPatternSupportingEvidence, buildAnalysisInput, buildPatternsBrief, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generatePatternsUpdate, generateReply, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
+import { attachPatternSupportingEvidence, buildAnalysisInput, buildPatternsBrief, buildEntryTitle, buildPatternDebugReport, buildPatterns, buildSummary, chooseResurfacingCard, generateAnalysis, generatePatternReply, generatePatternsUpdate, generateReply, integrateCompanionReplyIntoMemory, integratePatternReplyIntoMemory, inferTags, rewriteMemoryDoc, transcribeJournalPhotosWithStatus, } from './lib/ai.js';
 import { getStore, isLiveStore } from './lib/store.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -186,6 +186,21 @@ function triggerPatternRefreshAfterReply(userId, pattern, userMessage, answer) {
         await store.updatePatterns(userId, patterns);
     })().catch((error) => {
         console.error('Pattern refresh after reply failed', error);
+    });
+}
+function triggerCompanionRefreshAfterReply(userId, userMessage, answer) {
+    void (async () => {
+        const { store } = getStore();
+        const bootstrap = await store.getBootstrap(userId);
+        const previousPatterns = shouldRefreshPatterns(bootstrap.patternEntries.length, bootstrap.patterns)
+            ? []
+            : bootstrap.patterns;
+        const nextMemory = await integrateCompanionReplyIntoMemory(bootstrap.memoryDoc, userMessage, answer);
+        const memoryDoc = await store.updateMemory(userId, nextMemory);
+        const patterns = await buildPatterns(memoryDoc, bootstrap.patternEntries, previousPatterns);
+        await store.updatePatterns(userId, patterns);
+    })().catch((error) => {
+        console.error('Companion refresh after reply failed', error);
     });
 }
 app.get('/api/health', (_request, response) => {
@@ -481,6 +496,9 @@ async function handleCompanionReply(request, response, next) {
         const bootstrap = await store.getBootstrap(userId);
         const answer = await generatePatternsUpdate(bootstrap.patterns, bootstrap.patternEntries, bootstrap.memoryDoc, parsed.content, parsed.thread ?? []);
         response.json({ answer });
+        if (parsed.content?.trim()) {
+            triggerCompanionRefreshAfterReply(userId, parsed.content.trim(), answer);
+        }
     }
     catch (error) {
         next(error);

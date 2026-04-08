@@ -15,11 +15,12 @@ type CompanionMessage = {
 
 type CompanionViewProps = {
   patternsBrief: PatternsBrief | null
+  onRefreshAfterReply: () => Promise<void>
 }
 
 const DEFAULT_CURRENT_TAKE = 'Knowing what you know about me from the journal, what is your take on where things stand right now and what questions matter most?'
 
-export function CompanionView({ patternsBrief }: CompanionViewProps) {
+export function CompanionView({ onRefreshAfterReply, patternsBrief }: CompanionViewProps) {
   const [message, setMessage] = useState('')
   const [thread, setThread] = useState<CompanionMessage[]>([])
   const [busy, setBusy] = useState(false)
@@ -93,6 +94,9 @@ export function CompanionView({ patternsBrief }: CompanionViewProps) {
             : threadMessage,
         ),
       )
+      if (!isCurrentTake) {
+        void onRefreshAfterReply()
+      }
     } catch {
       setThread((current) =>
         current.map((threadMessage) =>
@@ -181,7 +185,7 @@ export function CompanionView({ patternsBrief }: CompanionViewProps) {
           </div>
         ) : null}
 
-        <div className="conversation-list companion-thread">
+        <div className="conversation-list companion-thread chat-bubbles">
           {thread.map((threadMessage) => (
             <article className={`message ${threadMessage.role} ${threadMessage.state === 'pending' ? 'pending' : ''}`} key={threadMessage.id}>
               <div className="message-meta">

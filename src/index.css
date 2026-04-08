@@ -1073,6 +1073,26 @@ button {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.chat-bubbles .message {
+  max-width: min(78%, 860px);
+  align-self: flex-start;
+  border-radius: 24px;
+  padding: 16px 18px;
+}
+
+.chat-bubbles .message.user {
+  align-self: flex-end;
+  border-bottom-right-radius: 10px;
+}
+
+.chat-bubbles .message.assistant {
+  border-bottom-left-radius: 10px;
+}
+
+.chat-bubbles .message.pending {
+  opacity: 0.82;
+}
+
 .conversation-header {
   display: flex;
   justify-content: space-between;
@@ -1499,6 +1519,11 @@ button {
 
 .companion-thread {
   min-height: 220px;
+}
+
+.pattern-thread.chat-bubbles,
+.companion-thread.chat-bubbles {
+  gap: 10px;
 }
 
 .companion-chat {

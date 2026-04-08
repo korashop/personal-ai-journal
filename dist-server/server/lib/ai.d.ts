@@ -80,6 +80,7 @@ export declare function generatePatternsUpdate(patterns: PatternSection[], entri
     content: string;
 }>): Promise<string>;
 export declare function integratePatternReplyIntoMemory(currentMemory: MemoryDocumentRecord | null, pattern: PatternSection, userMessage: string, answer: string): Promise<string>;
+export declare function integrateCompanionReplyIntoMemory(currentMemory: MemoryDocumentRecord | null, userMessage: string, answer: string): Promise<string>;
 export declare function transcribeJournalPhotos(files: UploadedPhoto[]): Promise<string>;
 export declare function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]): Promise<TranscriptionResult>;
 export {};

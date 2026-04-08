@@ -3835,6 +3835,48 @@ ${clipForPrompt(answer, 900)}`
     .trim()
 }
 
+export async function integrateCompanionReplyIntoMemory(
+  currentMemory: MemoryDocumentRecord | null,
+  userMessage: string,
+  answer: string,
+): Promise<string> {
+  if (!anthropic) {
+    const existing = currentMemory?.content?.trim()
+    const addition = `Companion chat\nUser explored: ${userMessage}\nWorking insight: ${clip(answer, 220)}`
+    return existing ? `${existing}\n\n${addition}` : addition
+  }
+
+  const prompt = `Update the user's living memory document after an open-ended companion conversation.
+Return markdown only.
+
+Rules:
+- Fold in only the durable insight from this exchange, not the whole transcript.
+- Preserve continuity with the existing memory document.
+- If the exchange adds little of lasting value, keep changes minimal.
+- Prefer updating live tensions, desires, fears, or decisions over adding generic advice.
+
+Current memory document:
+${memoryForPrompt(currentMemory, 1800)}
+
+User message:
+${clipForPrompt(userMessage, 600)}
+
+Assistant response:
+${clipForPrompt(answer, 900)}`
+
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 900,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  return response.content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+    .trim()
+}
+
 export async function transcribeJournalPhotos(files: UploadedPhoto[]): Promise<string> {
   const result = await transcribeJournalPhotosWithStatus(files)
   return result.transcript

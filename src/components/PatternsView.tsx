@@ -379,6 +379,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
             : threadMessage,
         ),
       )
+      void onGenerateBrief()
     } catch {
       setUpdateThread((current) =>
         current.map((threadMessage) =>
@@ -517,7 +518,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                         </div>
                       </div>
 
-                      <div className="conversation-list pattern-thread pattern-brief-thread">
+                      <div className="conversation-list pattern-thread pattern-brief-thread chat-bubbles">
                         {updateThread.map((threadMessage) => (
                           <article className={`message ${threadMessage.role} ${threadMessage.state === 'pending' ? 'pending' : ''}`} key={threadMessage.id}>
                             <div className="message-meta">
@@ -794,7 +795,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                     </div>
                   ) : null}
 
-                  <div className="conversation-list pattern-thread">
+                  <div className="conversation-list pattern-thread chat-bubbles">
                     {selectedThread.length ? (
                       selectedThread.map((threadMessage) => (
                         <article className={`message ${threadMessage.role} ${threadMessage.state === 'pending' ? 'pending' : ''}`} key={threadMessage.id}>
