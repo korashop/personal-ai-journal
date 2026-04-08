@@ -148,6 +148,10 @@ function cleanTruncatedEnding(text: string) {
   return normalized
 }
 
+function lowerCaseFirst(text: string) {
+  return text ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : text
+}
+
 function stripMarkdown(text: string) {
   return repairKnownTextArtifacts(text)
     .replace(/[*_`>#-]+/g, ' ')
@@ -1874,7 +1878,7 @@ function buildOverviewFromCluster(
     'self-authorization':
       'A recurring threshold is feeling like you need to prove capability, clarify credentials, or pre-justify the ask before saying directly what you want.',
     'outward-proof':
-      'This theme is about outsourcing conviction to admired people or external signs, then using their choices, attention, or status as evidence for whether your own desire is legitimate.',
+      'You keep outsourcing conviction to admired people or external signs, then using their choices, attention, or status as evidence for whether your own desire is legitimate.',
     'alignment-drift':
       'You keep tracking a gap between the life-state that feels aligned or surrendered and the ways daily choices, work modes, or relationships pull you away from that state.',
     'output-anchor':
@@ -1882,13 +1886,13 @@ function buildOverviewFromCluster(
     'relationship-attunement':
       'The recurring need here is not just closeness, but felt attunement: love has to feel expressive, specific, and deeply seen, and the Dani reflections seem to crystallize that standard.',
     'collaboration-threshold':
-      'This theme is about moving from lone effort into the “who not how” question: what kind of collaborators, partners, or team structure would actually let the work become bigger and more real.',
+      'The live move here is from lone effort into the “who not how” question: what kind of collaborators, partners, or team structure would actually let the work become bigger and more real.',
     'family-mission':
       'Family shows up as more than a generic future goal—it reads like a life-orienting mission, with a live question about how to build toward that deliberately while staying in surrender.',
     'depth-craft':
       'You keep contrasting broad, shallow motion with a hunger for depth, craft, and sustained immersion in something you can really follow all the way through.',
     'certainty-delay':
-      'This theme is about waiting for more certainty, legitimacy, or readiness before visible action, and then feeling the cost of that delay once the desire becomes clearer.',
+      'You keep waiting for more certainty, legitimacy, or readiness before visible action, and then feeling the cost of that delay once the desire becomes clearer.',
     'physical-pull':
       'There is a repeated pull toward physical, tactile, embodied forms of making—projects, sport, coaching, or collage—that seem to carry a different kind of energy than abstract thinking alone.',
     'missed-window':
@@ -1902,6 +1906,20 @@ function buildOverviewFromCluster(
       : `${title} is present in this entry, but the underlying shape is still emerging.`)
 
   return cleanTruncatedEnding(intro) || title
+}
+
+function sanitizePatternOverviewText(text: string) {
+  const cleaned = cleanTruncatedEnding(text)
+    .replace(/\bRecent evidence:\s*.+$/i, '')
+    .replace(/\bExample:\s*.+$/i, '')
+    .replace(/\bThe question this raises:\s*.+$/i, '')
+    .replace(/^This theme is about\s+/i, '')
+    .replace(/^This theme\s+/i, '')
+    .trim()
+
+  if (!cleaned) return ''
+  const normalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
+  return cleanTruncatedEnding(normalized)
 }
 
 function formatPatternSentence(text: string) {
@@ -1986,7 +2004,7 @@ function buildThemeDimensionText(cluster: PatternClusterDraft, evidence: string,
 
   const lead = dimensionLeadForCluster(cluster, index)
   if (lead) {
-    return formatPatternSentence(`${lead} Example: ${cleaned}`)
+    return formatPatternSentence(`${lead} ${lowerCaseFirst(cleaned)}`)
   }
 
   const lower = cleaned.toLowerCase()
@@ -2547,6 +2565,40 @@ function evidenceBelongsToCluster(cluster: PatternClusterDraft, evidence: string
   return family ? family.test.test(evidence) : true
 }
 
+function supportingEvidencePriority(
+  item: NonNullable<PatternSection['supportingEvidence']>[number],
+) {
+  const sourceScore =
+    item.sourceType === 'raw_quote' ? 4 :
+      item.sourceType === 'analysis_quote' ? 2 :
+        1
+  return sourceScore + (item.confidence ?? 0.6) + (item.salience ?? 0.6)
+}
+
+function selectSupportingEvidenceRows(
+  items: NonNullable<PatternSection['supportingEvidence']>,
+  maxItems = 8,
+) {
+  const selected: NonNullable<PatternSection['supportingEvidence']> = []
+  const usedEntryIds = new Set<string>()
+
+  for (const item of [...items].sort((left, right) => supportingEvidencePriority(right) - supportingEvidencePriority(left))) {
+    if (!item.snippet || evidenceLooksFragmentary(item.snippet)) continue
+    if (usedEntryIds.has(item.entryId)) continue
+    if (selected.some((existing) => semanticSimilarity(existing.claim ?? '', item.claim ?? '') >= 0.9)) continue
+    if (selected.some((existing) => textOverlapScore(existing.snippet, item.snippet) >= 0.72)) continue
+    selected.push(item)
+    usedEntryIds.add(item.entryId)
+    if (selected.length >= maxItems) break
+  }
+
+  if (selected.length) return selected
+
+  return [...items]
+    .sort((left, right) => supportingEvidencePriority(right) - supportingEvidencePriority(left))
+    .slice(0, maxItems)
+}
+
 function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
   const evidence = buildClusterDimensionLines(cluster)
 
@@ -2560,24 +2612,26 @@ function buildDeterministicPatternFromCluster(cluster: PatternClusterDraft) {
       `Find the cost of ${cluster.title.toLowerCase()}`,
       `Look for the next concrete move inside ${cluster.title.toLowerCase()}`,
     ].map((item) => cleanTruncatedEnding(item)).slice(0, 3),
-    supportingEvidence: cluster.evidenceByEntry
-      .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
-      .map((item) => ({
-        entryId: item.entryId,
-        entryTitle: item.entryTitle,
-        snippet: cleanTruncatedEnding(item.evidence),
-        sourceType: item.sourceType,
-        sectionTitle: item.sectionTitle,
+    supportingEvidence: selectSupportingEvidenceRows(
+      cluster.evidenceByEntry
+        .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
+        .map((item) => ({
+          entryId: item.entryId,
+          entryTitle: item.entryTitle,
+          snippet: cleanTruncatedEnding(item.evidence),
+          sourceType: item.sourceType,
+          sectionTitle: item.sectionTitle,
         threadLabel: cluster.title,
         claim: cleanTruncatedEnding(item.claim),
         whyItMatters: cleanTruncatedEnding(item.whyItMatters),
         confidence: item.confidence,
-        salience: item.salience,
-        tags: item.tags,
-        createdAt: item.createdAt,
-      }))
-      .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet))
-      .slice(0, 8),
+          salience: item.salience,
+          tags: item.tags,
+          createdAt: item.createdAt,
+        }))
+        .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet)),
+      8,
+    ),
     entryIds: cluster.entryIds,
   })
 }
@@ -2912,7 +2966,7 @@ ${clusters
 
     const pattern = buildThemeRankMetadata({
       title: simplifyPatternTitle(enriched.title),
-      overview: cleanTruncatedEnding(enriched.overview),
+      overview: sanitizePatternOverviewText(enriched.overview),
       dimensions: dedupePatternLines(
         (enriched.dimensions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean),
         enriched.overview,
@@ -2924,9 +2978,10 @@ ${clusters
       exploreOptions: dedupePatternLines(
         (enriched.exploreOptions ?? []).map((item) => cleanTruncatedEnding(item)).filter(Boolean),
       ).slice(0, 3),
-      supportingEvidence: cluster.evidenceByEntry
-        .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
-        .map((item) => ({
+      supportingEvidence: selectSupportingEvidenceRows(
+        cluster.evidenceByEntry
+          .filter((item) => evidenceBelongsToCluster(cluster, item.evidence))
+          .map((item) => ({
           entryId: item.entryId,
           entryTitle: item.entryTitle,
           snippet: cleanTruncatedEnding(item.evidence),
@@ -2940,8 +2995,9 @@ ${clusters
           tags: item.tags,
           createdAt: item.createdAt,
         }))
-        .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet))
-        .slice(0, 8),
+          .filter((item) => item.snippet && !evidenceLooksFragmentary(item.snippet)),
+        8,
+      ),
       entryIds: cluster.entryIds,
     })
 
@@ -3067,7 +3123,7 @@ export function attachPatternSupportingEvidence(
     if (cleanedExisting.length >= Math.min(pattern.entryIds.length, 2)) {
       return buildThemeRankMetadata({
         ...pattern,
-        supportingEvidence: cleanedExisting.slice(0, 8),
+        supportingEvidence: selectSupportingEvidenceRows(cleanedExisting, 8),
       })
     }
 
@@ -3085,10 +3141,12 @@ export function attachPatternSupportingEvidence(
 
     return buildThemeRankMetadata({
       ...pattern,
-      supportingEvidence: dedupedSnippets
-        .map((snippet) => derivedEvidence.find((item) => item.snippet === snippet))
-        .filter((item): item is NonNullable<typeof item> => Boolean(item))
-        .slice(0, 8),
+      supportingEvidence: selectSupportingEvidenceRows(
+        dedupedSnippets
+          .map((snippet) => derivedEvidence.find((item) => item.snippet === snippet))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+        8,
+      ),
     })
   })
 }
