@@ -435,6 +435,11 @@ button {
   line-height: 1.6;
 }
 
+.split-preview-date {
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+}
+
 .compact-icon {
   padding: 9px 11px;
 }

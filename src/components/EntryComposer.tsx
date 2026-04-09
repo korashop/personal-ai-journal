@@ -117,6 +117,17 @@ function detectMissingOcrPages(text: string, photos: File[]): MissingOcrPage[] {
     .sort((left, right) => left.pageNumber - right.pageNumber)
 }
 
+function formatDetectedDate(dateString?: string) {
+  if (!dateString) return null
+  const parsed = new Date(dateString)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 type EntryComposerProps = {
   busy: boolean
   submitPhase: 'idle' | 'submitting' | 'submitting_split'
@@ -509,7 +520,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
                     <div>
                       <p className="subtle-label">Possible entry splits</p>
                       <p className="hint">
-                        I found {splitCandidates.length} dated sections in this reviewed text. Keep one combined entry or submit them separately.
+                        I found {splitCandidates.length} dated sections in this reviewed text. If you split them, each entry will use its detected date and appear in chronological order in the journal.
                       </p>
                     </div>
                     <div className="split-review-actions">
@@ -537,6 +548,11 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
                           <strong>{candidate.label}</strong>
                           <span className="hint">Entry {index + 1}</span>
                         </div>
+                        <p className="split-preview-date">
+                          {formatDetectedDate(candidate.createdAt)
+                            ? `Will be dated ${formatDetectedDate(candidate.createdAt)} in the journal`
+                            : 'No date was confidently detected yet'}
+                        </p>
                         <p>{candidate.preview}</p>
                       </section>
                     ))}
