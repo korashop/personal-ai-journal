@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, FileText, ImagePlus, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 
 import { transcribePhotos } from '../lib/api'
@@ -198,6 +198,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
   const [reviewMeta, setReviewMeta] = useState<{ imageCount: number; failedCount: number } | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [submitAsSplitEntries, setSubmitAsSplitEntries] = useState(false)
+  const [splitChoiceTouched, setSplitChoiceTouched] = useState(false)
   const [replaceTargetPage, setReplaceTargetPage] = useState<number | null>(null)
   const [pageRetryBusy, setPageRetryBusy] = useState<number | null>(null)
 
@@ -210,6 +211,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     [transcribedPages],
   )
   const hasTranscriptionAttempt = reviewMeta !== null
+  const hasSplitCandidates = splitCandidates.length > 0
   const captureStatusText = getCaptureStatusText({
     busy,
     submitPhase,
@@ -221,6 +223,18 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     splitCount: splitCandidates.length,
   })
 
+  useEffect(() => {
+    if (!hasSplitCandidates) {
+      setSubmitAsSplitEntries(false)
+      setSplitChoiceTouched(false)
+      return
+    }
+
+    if (!splitChoiceTouched) {
+      setSubmitAsSplitEntries(true)
+    }
+  }, [hasSplitCandidates, splitChoiceTouched])
+
   function resetReviewState(nextError: string | null = null) {
     setTranscribedPages([])
     setReviewReady(false)
@@ -228,6 +242,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     setReviewError(nextError)
     setReviewMeta(null)
     setSubmitAsSplitEntries(false)
+    setSplitChoiceTouched(false)
     setPageRetryBusy(null)
   }
 
@@ -306,6 +321,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     setReviewError(null)
     setReviewMeta(null)
     setSubmitAsSplitEntries(false)
+    setSplitChoiceTouched(false)
     setPageRetryBusy(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -332,6 +348,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
       setReviewMeta({ imageCount: result.imageCount, failedCount: result.failedCount })
       setReviewReady(result.failedCount === 0 && result.pageResults.length === nextPhotos.length)
       setSubmitAsSplitEntries(false)
+      setSplitChoiceTouched(false)
 
       if (!result.anySucceeded) {
         setReviewError('The app could not read those images well enough yet. Try adding a bit of typed context, or use clearer JPG/PNG photos.')
@@ -398,7 +415,10 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
       setReviewMeta({ imageCount: nextPhotos.length, failedCount })
       setReviewReady(failedCount === 0 && mergedPages.length === nextPhotos.length)
       setTranscribedText(failedCount === 0 ? buildTranscriptFromPages(mergedPages) : '')
-      setSubmitAsSplitEntries(false)
+      if (failedCount > 0) {
+        setSubmitAsSplitEntries(false)
+        setSplitChoiceTouched(false)
+      }
       setReviewError(
         normalizedPage.success
           ? null
@@ -628,14 +648,20 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
                     <div className="split-review-actions">
                       <button
                         className={`ghost-button ${!submitAsSplitEntries ? 'selected' : ''}`}
-                        onClick={() => setSubmitAsSplitEntries(false)}
+                        onClick={() => {
+                          setSubmitAsSplitEntries(false)
+                          setSplitChoiceTouched(true)
+                        }}
                         type="button"
                       >
                         Keep one entry
                       </button>
                       <button
                         className={`ghost-button ${submitAsSplitEntries ? 'selected' : ''}`}
-                        onClick={() => setSubmitAsSplitEntries(true)}
+                        onClick={() => {
+                          setSubmitAsSplitEntries(true)
+                          setSplitChoiceTouched(true)
+                        }}
                         type="button"
                       >
                         Submit as {splitCandidates.length} entries
@@ -660,6 +686,13 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
                     ))}
                   </div>
                 </div>
+              ) : null}
+              {hasSplitCandidates ? (
+                <p className="hint split-submit-state">
+                  {submitAsSplitEntries
+                    ? `Current submit mode: ${splitCandidates.length} separate dated entries`
+                    : 'Current submit mode: one combined entry'}
+                </p>
               ) : null}
               <div className="transcription-review-submit">
                 <button

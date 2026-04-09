@@ -569,6 +569,11 @@ button {
   justify-content: flex-end;
 }
 
+.split-submit-state {
+  margin: 0;
+  color: var(--accent-strong);
+}
+
 .review-error {
   margin: 0;
   color: #ffd4cb;
