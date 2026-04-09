@@ -176,6 +176,12 @@ export type PhotoTranscriptionPayload = {
   anySucceeded: boolean
   failedCount: number
   imageCount: number
+  pageResults: Array<{
+    pageNumber: number
+    fileName: string
+    text: string
+    success: boolean
+  }>
 }
 
 export type CreateConversationPayload = {

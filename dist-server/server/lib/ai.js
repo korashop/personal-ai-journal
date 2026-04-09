@@ -3210,15 +3210,22 @@ async function preparePhotoForVision(file) {
 }
 export async function transcribeJournalPhotosWithStatus(files) {
     if (!files.length) {
-        return { transcript: '', anySucceeded: false, failedCount: 0 };
+        return { transcript: '', anySucceeded: false, failedCount: 0, pageResults: [] };
     }
     if (!anthropic) {
+        const pageResults = files.map((file, index) => ({
+            pageNumber: index + 1,
+            fileName: file.originalname,
+            text: '[OCR unavailable right now]',
+            success: false,
+        }));
         return {
-            transcript: files
-                .map((file, index) => `Image ${index + 1} - ${file.originalname}\n[OCR unavailable right now]`)
+            transcript: pageResults
+                .map((item) => `Page ${item.pageNumber}\n${item.text}`)
                 .join('\n\n---\n\n'),
             anySucceeded: false,
             failedCount: files.length,
+            pageResults,
         };
     }
     const pageResults = await Promise.all(files.map(async (file, index) => {
@@ -3255,28 +3262,35 @@ export async function transcribeJournalPhotosWithStatus(files) {
             if (!text) {
                 return {
                     success: false,
-                    section: `Image ${index + 1} - ${file.originalname}\n[OCR unavailable for this image]`,
+                    pageNumber: index + 1,
+                    fileName: file.originalname,
+                    text: '[OCR unavailable for this image]',
                 };
             }
             const cleaned = await cleanTranscription(text);
             return {
                 success: true,
-                section: `Page ${index + 1}\n${cleaned || text}`,
+                pageNumber: index + 1,
+                fileName: file.originalname,
+                text: cleaned || text,
             };
         }
         catch {
             return {
                 success: false,
-                section: `Page ${index + 1}\n[OCR unavailable for this image]`,
+                pageNumber: index + 1,
+                fileName: file.originalname,
+                text: '[OCR unavailable for this image]',
             };
         }
     }));
-    const sections = pageResults.map((result) => result.section);
+    const sections = pageResults.map((result) => `Page ${result.pageNumber}\n${result.text}`);
     const anySucceeded = pageResults.some((result) => result.success);
     const failedCount = pageResults.filter((result) => !result.success).length;
     return {
         transcript: sections.join('\n\n---\n\n'),
         anySucceeded,
         failedCount,
+        pageResults,
     };
 }

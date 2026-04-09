@@ -304,6 +304,10 @@ button {
   color: var(--text);
 }
 
+.photo-review-actions-top {
+  margin-top: 4px;
+}
+
 .capture-steps {
   display: flex;
   gap: 10px;
@@ -385,6 +389,27 @@ button {
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.ocr-resolution-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 212, 203, 0.12);
+  background: rgba(255, 212, 203, 0.035);
+}
+
+.ocr-resolution-header h3 {
+  margin: 4px 0 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.ocr-resolution-hint {
+  margin: 8px 0 0;
+  max-width: 72ch;
 }
 
 .split-review-header {
@@ -488,10 +513,28 @@ button {
   gap: 8px;
 }
 
-.ocr-missing-chip-row {
+.ocr-missing-row {
   display: flex;
   flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ocr-missing-row-main {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+
+.ocr-missing-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   align-items: center;
 }
 
@@ -519,6 +562,11 @@ button {
   padding: 22px 24px;
   font-size: 1rem;
   line-height: 1.75;
+}
+
+.transcription-review-submit {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .review-error {

@@ -13,6 +13,12 @@ type TranscriptionResult = {
     transcript: string;
     anySucceeded: boolean;
     failedCount: number;
+    pageResults: Array<{
+        pageNumber: number;
+        fileName: string;
+        text: string;
+        success: boolean;
+    }>;
 };
 export declare function sanitizeJournalText(text: string): string;
 export declare function buildAnalysisInput(text: string): string;

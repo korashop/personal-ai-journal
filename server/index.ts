@@ -422,6 +422,7 @@ app.post('/api/transcribe-photos', upload.array('photos', MAX_PHOTO_UPLOADS), as
       anySucceeded: result.anySucceeded,
       failedCount: result.failedCount,
       imageCount: files.length,
+      pageResults: result.pageResults,
     })
   } catch (error) {
     next(error)

@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 
 import { transcribePhotos } from '../lib/api'
-import type { EntrySource } from '../types'
+import type { EntrySource, PhotoTranscriptionPayload } from '../types'
 
 const MAX_PHOTO_UPLOADS = 24
 
@@ -100,20 +100,22 @@ type MissingOcrPage = {
   fileName?: string
 }
 
-function detectMissingOcrPages(text: string, photos: File[]): MissingOcrPage[] {
-  return text
-    .split(/\n\s*---\s*\n/g)
-    .map((section) => section.trim())
-    .flatMap((section) => {
-      if (!/\[OCR unavailable(?: for this image| right now)\]/i.test(section)) return []
-      const match = section.match(/(?:Page|Image)\s+(\d+)/i)
-      const pageNumber = match ? Number(match[1]) : NaN
-      if (!Number.isFinite(pageNumber)) return []
-      return [{
-        pageNumber,
-        fileName: photos[pageNumber - 1]?.name,
-      }]
-    })
+type TranscribedPage = PhotoTranscriptionPayload['pageResults'][number]
+
+function buildTranscriptFromPages(pages: TranscribedPage[]) {
+  return pages
+    .sort((left, right) => left.pageNumber - right.pageNumber)
+    .map((page) => `Page ${page.pageNumber}\n${page.text}`)
+    .join('\n\n---\n\n')
+}
+
+function detectMissingOcrPages(pages: TranscribedPage[]): MissingOcrPage[] {
+  return pages
+    .filter((page) => !page.success)
+    .map((page) => ({
+      pageNumber: page.pageNumber,
+      fileName: page.fileName,
+    }))
     .sort((left, right) => left.pageNumber - right.pageNumber)
 }
 
@@ -148,10 +150,12 @@ function getCaptureStatusText(params: {
   submitPhase: EntryComposerProps['submitPhase']
   reviewBusy: boolean
   reviewReady: boolean
+  hasTranscriptionAttempt: boolean
+  failedCount: number
   photoCount: number
   splitCount: number
 }) {
-  const { busy, submitPhase, reviewBusy, reviewReady, photoCount, splitCount } = params
+  const { busy, submitPhase, reviewBusy, reviewReady, hasTranscriptionAttempt, failedCount, photoCount, splitCount } = params
 
   if (reviewBusy) {
     return `Transcribing ${photoCount} page${photoCount === 1 ? '' : 's'} now...`
@@ -169,6 +173,10 @@ function getCaptureStatusText(params: {
     return 'Transcription is ready. Review the text, then submit when it looks right.'
   }
 
+  if (hasTranscriptionAttempt && failedCount > 0) {
+    return `${failedCount} page${failedCount === 1 ? '' : 's'} still need OCR help before full review can open.`
+  }
+
   if (photoCount) {
     return 'Add pages in reading order, then transcribe before submitting.'
   }
@@ -182,6 +190,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
   const [rawText, setRawText] = useState('')
   const [source, setSource] = useState<EntrySource>('typed')
   const [photos, setPhotos] = useState<File[]>([])
+  const [transcribedPages, setTranscribedPages] = useState<TranscribedPage[]>([])
   const [transcribedText, setTranscribedText] = useState('')
   const [reviewReady, setReviewReady] = useState(false)
   const [reviewBusy, setReviewBusy] = useState(false)
@@ -190,30 +199,36 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
   const [dragActive, setDragActive] = useState(false)
   const [submitAsSplitEntries, setSubmitAsSplitEntries] = useState(false)
   const [replaceTargetPage, setReplaceTargetPage] = useState<number | null>(null)
+  const [pageRetryBusy, setPageRetryBusy] = useState<number | null>(null)
 
   const splitCandidates = useMemo(
     () => (reviewReady && !rawText.trim() ? detectSplitCandidates(transcribedText) : []),
     [rawText, reviewReady, transcribedText],
   )
   const missingOcrPages = useMemo(
-    () => (reviewReady ? detectMissingOcrPages(transcribedText, photos) : []),
-    [photos, reviewReady, transcribedText],
+    () => detectMissingOcrPages(transcribedPages),
+    [transcribedPages],
   )
+  const hasTranscriptionAttempt = reviewMeta !== null
   const captureStatusText = getCaptureStatusText({
     busy,
     submitPhase,
     reviewBusy,
     reviewReady,
+    hasTranscriptionAttempt,
+    failedCount: reviewMeta?.failedCount ?? 0,
     photoCount: photos.length,
     splitCount: splitCandidates.length,
   })
 
   function resetReviewState(nextError: string | null = null) {
+    setTranscribedPages([])
     setReviewReady(false)
     setTranscribedText('')
     setReviewError(nextError)
     setReviewMeta(null)
     setSubmitAsSplitEntries(false)
+    setPageRetryBusy(null)
   }
 
   function appendPhotos(nextFiles: File[]) {
@@ -285,11 +300,13 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     setRawText('')
     setSource('typed')
     setPhotos([])
+    setTranscribedPages([])
     setTranscribedText('')
     setReviewReady(false)
     setReviewError(null)
     setReviewMeta(null)
     setSubmitAsSplitEntries(false)
+    setPageRetryBusy(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -310,9 +327,10 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
       setReviewBusy(true)
       setReviewError(null)
       const result = await transcribePhotos(nextPhotos)
-      setTranscribedText(result.transcript)
+      setTranscribedPages(result.pageResults)
+      setTranscribedText(result.failedCount === 0 ? buildTranscriptFromPages(result.pageResults) : '')
       setReviewMeta({ imageCount: result.imageCount, failedCount: result.failedCount })
-      setReviewReady(result.anySucceeded)
+      setReviewReady(result.failedCount === 0 && result.pageResults.length === nextPhotos.length)
       setSubmitAsSplitEntries(false)
 
       if (!result.anySucceeded) {
@@ -345,9 +363,52 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     const nextPhotos = photos.map((photo, index) => (index === pageNumber - 1 ? replacement : photo))
     setPhotos(nextPhotos)
     setSource('photo')
-    resetReviewState(`Replaced page ${pageNumber}. Re-transcribing now...`)
     setReplaceTargetPage(null)
-    await runPhotoTranscription(nextPhotos)
+    await retryPageTranscription(pageNumber, replacement, nextPhotos)
+  }
+
+  async function retryPageTranscription(pageNumber: number, file: File, nextPhotos = photos) {
+    try {
+      setPageRetryBusy(pageNumber)
+      setReviewError(null)
+      const result = await transcribePhotos([file])
+      const pageResult = result.pageResults[0] ?? {
+        pageNumber,
+        fileName: file.name,
+        text: '[OCR unavailable for this image]',
+        success: false,
+      }
+
+      const mergedPages = [...transcribedPages]
+      const normalizedPage = {
+        ...pageResult,
+        pageNumber,
+        fileName: file.name,
+      }
+      const existingIndex = mergedPages.findIndex((page) => page.pageNumber === pageNumber)
+      if (existingIndex >= 0) {
+        mergedPages[existingIndex] = normalizedPage
+      } else {
+        mergedPages.push(normalizedPage)
+      }
+      mergedPages.sort((left, right) => left.pageNumber - right.pageNumber)
+
+      const failedCount = mergedPages.filter((page) => !page.success).length
+      setTranscribedPages(mergedPages)
+      setReviewMeta({ imageCount: nextPhotos.length, failedCount })
+      setReviewReady(failedCount === 0 && mergedPages.length === nextPhotos.length)
+      setTranscribedText(failedCount === 0 ? buildTranscriptFromPages(mergedPages) : '')
+      setSubmitAsSplitEntries(false)
+      setReviewError(
+        normalizedPage.success
+          ? null
+          : `Page ${pageNumber} still could not be read. Try replacing that image or a clearer export of the same page.`,
+      )
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : `Could not retry page ${pageNumber}.`)
+    } finally {
+      setPageRetryBusy(null)
+    }
   }
 
   return (
@@ -463,50 +524,91 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
           />
           <div className="capture-steps">
             <span className={`capture-step ${photos.length ? 'done' : ''}`}>1. Add pages</span>
-            <span className={`capture-step ${reviewReady ? 'done' : photos.length ? 'active' : ''}`}>2. Transcribe images</span>
-            <span className={`capture-step ${busy ? 'active' : reviewReady ? 'active' : ''}`}>3. Analyze and save</span>
+            <span className={`capture-step ${hasTranscriptionAttempt && reviewMeta?.failedCount === 0 ? 'done' : photos.length ? 'active' : ''}`}>2. Read pages</span>
+            <span className={`capture-step ${hasTranscriptionAttempt && (reviewMeta?.failedCount ?? 0) > 0 ? 'active' : reviewReady ? 'done' : ''}`}>3. Fix unreadable pages</span>
+            <span className={`capture-step ${busy ? 'active' : reviewReady ? 'active' : ''}`}>4. Review and save</span>
           </div>
           <p className={`hint capture-status ${reviewBusy || busy ? 'active' : ''}`}>{captureStatusText}</p>
-          {reviewReady ? (
-            <div className="transcription-review transcription-review-prominent">
-              <div className="transcription-review-header">
+          {photos.length ? (
+            <div className="photo-review-actions photo-review-actions-top">
+              <button className="ghost-button" disabled={reviewBusy || busy} onClick={() => void handleReviewTranscription()} type="button">
+                {reviewBusy ? <LoaderCircle className="spin" size={16} /> : <FileText size={16} />}
+                {reviewBusy ? 'Reading pages...' : hasTranscriptionAttempt ? 'Read pages again' : 'Read pages'}
+              </button>
+              {reviewMeta ? (
+                <span className="hint">
+                  {reviewMeta.failedCount
+                    ? `${reviewMeta.imageCount - reviewMeta.failedCount}/${reviewMeta.imageCount} pages readable`
+                    : `All ${reviewMeta.imageCount}/${reviewMeta.imageCount} pages are readable`}
+                </span>
+              ) : (
+                <span className="hint">Run OCR once, then fix only the pages that still need help.</span>
+              )}
+            </div>
+          ) : null}
+          {hasTranscriptionAttempt && !reviewReady && reviewMeta ? (
+            <div className="ocr-resolution-panel">
+              <div className="ocr-resolution-header">
                 <div>
-                  <p className="subtle-label">Transcription review</p>
-                  <p className="hint transcription-review-hint">
-                    This is the main review step before submission. Fix OCR issues here, and add a date heading on its own line when a new journal day should become a separate entry.
+                  <p className="subtle-label">Resolve unreadable pages</p>
+                  <h3>{reviewMeta.failedCount ? `${reviewMeta.failedCount} page${reviewMeta.failedCount === 1 ? '' : 's'} still need help` : 'All pages are readable'}</h3>
+                  <p className="hint ocr-resolution-hint">
+                    We’ll keep the pages that already worked. Retry or replace only the broken ones, then the full transcription review will open.
                   </p>
                 </div>
-                <span className="hint">
-                  {missingOcrPages.length
-                    ? `Fill in or replace ${missingOcrPages.length} missing page${missingOcrPages.length === 1 ? '' : 's'}`
-                    : 'Review, edit, then submit'}
-                </span>
               </div>
               {missingOcrPages.length ? (
-                <div className="ocr-missing-panel">
-                  <p className="ocr-missing-title">These pages still need attention</p>
-                  <p className="hint">
-                    Replace the failed image directly, or edit the placeholder text below. Replacing a page will automatically re-transcribe the full set in order.
-                  </p>
-                  <div className="ocr-missing-list">
-                    {missingOcrPages.map((item) => (
-                      <div className="ocr-missing-chip-row" key={`${item.pageNumber}-${item.fileName ?? 'page'}`}>
+                <div className="ocr-missing-list">
+                  {missingOcrPages.map((item) => (
+                    <div className="ocr-missing-row" key={`${item.pageNumber}-${item.fileName ?? 'page'}`}>
+                      <div className="ocr-missing-row-main">
                         <span className="ocr-missing-chip">
                           Page {item.pageNumber}{item.fileName ? ` - ${item.fileName}` : ''}
                         </span>
+                        <span className="hint">This page still needs OCR help before review can open.</span>
+                      </div>
+                      <div className="ocr-missing-row-actions">
                         <button
                           className="ghost-button compact-button"
-                          disabled={busy || reviewBusy}
+                          disabled={busy || reviewBusy || pageRetryBusy === item.pageNumber}
+                          onClick={() => {
+                            const pageFile = photos[item.pageNumber - 1]
+                            if (!pageFile) return
+                            void retryPageTranscription(item.pageNumber, pageFile)
+                          }}
+                          type="button"
+                        >
+                          {pageRetryBusy === item.pageNumber ? <LoaderCircle className="spin" size={16} /> : null}
+                          Retry OCR
+                        </button>
+                        <button
+                          className="ghost-button compact-button"
+                          disabled={busy || reviewBusy || pageRetryBusy === item.pageNumber}
                           onClick={() => handleReplacePage(item.pageNumber)}
                           type="button"
                         >
                           Replace image
                         </button>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+          {reviewReady ? (
+            <div className="transcription-review transcription-review-prominent">
+              <div className="transcription-review-header">
+                <div>
+                  <p className="subtle-label">Transcription review</p>
+                  <p className="hint transcription-review-hint">
+                    This is the main review step before submission. Add a date heading on its own line when a new journal day should become a separate entry.
+                  </p>
+                </div>
+                <span className="hint">
+                  Review, edit, then submit
+                </span>
+              </div>
               <textarea
                 className="entry-textarea transcription-textarea transcription-textarea-prominent"
                 onChange={(event) => setTranscribedText(event.target.value)}
@@ -559,6 +661,22 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
                   </div>
                 </div>
               ) : null}
+              <div className="transcription-review-submit">
+                <button
+                  className="primary-button"
+                  disabled={busy || !reviewReady}
+                  type="submit"
+                >
+                  {busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                  {busy
+                    ? submitPhase === 'submitting_split'
+                      ? `Saving ${splitCandidates.length} entries...`
+                      : 'Analyzing and saving...'
+                    : submitAsSplitEntries && splitCandidates.length
+                      ? `Submit ${splitCandidates.length} entries`
+                      : 'Submit reviewed entry'}
+                </button>
+              </div>
             </div>
           ) : null}
           {photos.length ? (
@@ -585,43 +703,19 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
             </div>
           ) : null}
 
-          {photos.length ? (
-            <div className="photo-review-actions">
-              <button className="ghost-button" disabled={reviewBusy || busy} onClick={() => void handleReviewTranscription()} type="button">
-                {reviewBusy ? <LoaderCircle className="spin" size={16} /> : <FileText size={16} />}
-                {reviewBusy ? 'Reading photos...' : reviewReady ? 'Re-transcribe images' : 'Transcribe images'}
-              </button>
-              {reviewMeta ? (
-                <span className="hint">
-                  {reviewMeta.failedCount
-                    ? `${reviewMeta.imageCount - reviewMeta.failedCount}/${reviewMeta.imageCount} images read`
-                    : `Read ${reviewMeta.imageCount}/${reviewMeta.imageCount} images`}
-                </span>
-              ) : (
-                <span className="hint">Click transcribe images before submitting.</span>
-              )}
-            </div>
-          ) : null}
-
           {reviewError ? <p className="review-error">{reviewError}</p> : null}
         </div>
 
-        <button
-          className="primary-button"
-          disabled={busy || (!rawText.trim() && photos.length === 0) || (photos.length > 0 && !reviewReady)}
-          type="submit"
-        >
-          {busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-          {busy
-            ? submitPhase === 'submitting_split'
-              ? `Saving ${splitCandidates.length} entries...`
-              : 'Analyzing and saving...'
-            : submitAsSplitEntries && splitCandidates.length
-              ? `Submit ${splitCandidates.length} entries`
-              : photos.length
-                ? 'Submit reviewed entry'
-                : 'Submit entry'}
-        </button>
+        {photos.length === 0 ? (
+          <button
+            className="primary-button"
+            disabled={busy || !rawText.trim()}
+            type="submit"
+          >
+            {busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+            {busy ? 'Analyzing and saving...' : 'Submit entry'}
+          </button>
+        ) : null}
       </div>
     </form>
   )

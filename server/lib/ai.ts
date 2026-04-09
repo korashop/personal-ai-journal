@@ -31,6 +31,12 @@ type TranscriptionResult = {
   transcript: string
   anySucceeded: boolean
   failedCount: number
+  pageResults: Array<{
+    pageNumber: number
+    fileName: string
+    text: string
+    success: boolean
+  }>
 }
 
 const anthropic = hasAnthropicConfig ? new Anthropic({ apiKey: config.anthropicApiKey }) : null
@@ -3945,16 +3951,23 @@ async function preparePhotoForVision(file: UploadedPhoto): Promise<UploadedPhoto
 
 export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]): Promise<TranscriptionResult> {
   if (!files.length) {
-    return { transcript: '', anySucceeded: false, failedCount: 0 }
+    return { transcript: '', anySucceeded: false, failedCount: 0, pageResults: [] }
   }
 
   if (!anthropic) {
+    const pageResults = files.map((file, index) => ({
+      pageNumber: index + 1,
+      fileName: file.originalname,
+      text: '[OCR unavailable right now]',
+      success: false,
+    }))
     return {
-      transcript: files
-        .map((file, index) => `Image ${index + 1} - ${file.originalname}\n[OCR unavailable right now]`)
+      transcript: pageResults
+        .map((item) => `Page ${item.pageNumber}\n${item.text}`)
         .join('\n\n---\n\n'),
       anySucceeded: false,
       failedCount: files.length,
+      pageResults,
     }
   }
 
@@ -3996,7 +4009,9 @@ export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]):
         if (!text) {
           return {
             success: false,
-            section: `Image ${index + 1} - ${file.originalname}\n[OCR unavailable for this image]`,
+            pageNumber: index + 1,
+            fileName: file.originalname,
+            text: '[OCR unavailable for this image]',
           }
         }
 
@@ -4004,18 +4019,22 @@ export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]):
 
         return {
           success: true,
-          section: `Page ${index + 1}\n${cleaned || text}`,
+          pageNumber: index + 1,
+          fileName: file.originalname,
+          text: cleaned || text,
         }
       } catch {
         return {
           success: false,
-          section: `Page ${index + 1}\n[OCR unavailable for this image]`,
+          pageNumber: index + 1,
+          fileName: file.originalname,
+          text: '[OCR unavailable for this image]',
         }
       }
     }),
   )
 
-  const sections = pageResults.map((result) => result.section)
+  const sections = pageResults.map((result) => `Page ${result.pageNumber}\n${result.text}`)
   const anySucceeded = pageResults.some((result) => result.success)
   const failedCount = pageResults.filter((result) => !result.success).length
 
@@ -4023,5 +4042,6 @@ export async function transcribeJournalPhotosWithStatus(files: UploadedPhoto[]):
     transcript: sections.join('\n\n---\n\n'),
     anySucceeded,
     failedCount,
+    pageResults,
   }
 }
