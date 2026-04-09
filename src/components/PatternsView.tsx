@@ -288,6 +288,11 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     ].filter((group) => group.patterns.length)
   }, [patterns])
 
+  const currentFronts = useMemo(
+    () => (patternsBrief?.currentFronts ?? []).filter((front) => front.entryIds.length),
+    [patternsBrief?.currentFronts],
+  )
+
   const engagementPrompts = useMemo(
     () =>
       filterDistinctLines(
@@ -578,10 +583,40 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                   )
                 ) : null}
 
+                {currentFronts.length ? (
+                  <section className="pattern-tier-section">
+                    <div className="pattern-tier-header">
+                      <p className="subtle-label">Current fronts</p>
+                      <p className="pattern-tier-summary">
+                        Concrete life areas that look especially active in the most recent entries, even if they are not yet durable themes.
+                      </p>
+                    </div>
+                    <div className="pattern-home-list pattern-front-list">
+                      {currentFronts.map((front) => (
+                        <button
+                          className="pattern-home-card pattern-front-card"
+                          key={front.id}
+                          onClick={() => onOpenEntry(front.entryIds[0])}
+                          type="button"
+                        >
+                          <div className="pattern-home-meta">
+                            <strong>{front.title}</strong>
+                            <span className="pattern-timestamp">Recent front</span>
+                          </div>
+                          <p className="pattern-home-preview">{shortDisplayText(front.summary, 170)}</p>
+                          <small>{front.entryIds.length} related entr{front.entryIds.length === 1 ? 'y' : 'ies'}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
                 {patternGroups.map((group) => (
                   <section className="pattern-tier-section" key={group.id}>
                   <div className="pattern-tier-header">
-                    <p className="subtle-label">{group.title}</p>
+                    <p className="subtle-label">
+                      {group.id === 'dominant' && currentFronts.length ? 'Most live themes' : group.title}
+                    </p>
                   </div>
                   <div className="pattern-home-list">
                     {group.patterns.map((pattern) => {

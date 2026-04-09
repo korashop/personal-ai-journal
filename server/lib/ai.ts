@@ -2639,13 +2639,144 @@ function buildExpandedBriefOverview(
   }
 }
 
-export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | null {
+type CurrentFront = NonNullable<PatternsBrief['currentFronts']>[number]
+
+type CurrentFrontSpec = {
+  id: string
+  title: string
+  keywords: string[]
+  summary: (entries: JournalEntry[]) => string
+}
+
+function recentEntryScore(index: number) {
+  return Math.max(0.3, 1.4 - index * 0.18)
+}
+
+function buildCurrentFrontSummary(entries: JournalEntry[], lines: string[]) {
+  const summary = dedupePatternLines(lines).slice(0, 2).join(' ')
+  return clipAtWord(summary, 190)
+}
+
+function buildCurrentFronts(entries: JournalEntry[], patterns: PatternSection[]): CurrentFront[] {
+  const recentEntries = [...entries]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 8)
+
+  if (!recentEntries.length) return []
+
+  const specs: CurrentFrontSpec[] = [
+    {
+      id: 'relationship',
+      title: 'Relationship / attunement',
+      keywords: ['relationship', 'love', 'partner', 'attunement', 'dani', 'eve', 'romance', 'dating', 'closeness'],
+      summary: (items) =>
+        buildCurrentFrontSummary(items, [
+          'Recent entries keep returning to relationship as a live front, especially around whether closeness feels specific, expressive, and genuinely attuned.',
+          items[0]?.summary ?? '',
+        ]),
+    },
+    {
+      id: 'home',
+      title: 'Apartment / place decision',
+      keywords: ['apartment', 'move', 'moving', 'lease', 'home', 'nordau', 'israel', 'stay', 'leave', 'place', 'relocate'],
+      summary: (items) =>
+        buildCurrentFrontSummary(items, [
+          'The apartment / place decision looks actively live, with recent entries treating it as a real near-term choice rather than background logistics.',
+          items[0]?.summary ?? '',
+        ]),
+    },
+    {
+      id: 'collaboration',
+      title: 'Collaboration / reach-outs',
+      keywords: ['collabor', 'partner', 'who not how', 'hire', 'team', 'reach out', 'shared ownership', 'elie', 'toby'],
+      summary: (items) =>
+        buildCurrentFrontSummary(items, [
+          'Collaboration is showing up as a current front, not just a general idea, especially around who to involve and what contact has not happened yet.',
+          items[0]?.summary ?? '',
+        ]),
+    },
+    {
+      id: 'work-direction',
+      title: 'Work direction / output',
+      keywords: ['work', 'project', 'business', 'build', 'ship', 'output', 'studio', 'deck', 'creation'],
+      summary: (items) =>
+        buildCurrentFrontSummary(items, [
+          'Work direction still looks live, especially where output, direction, and what to actually build are getting tested against each other.',
+          items[0]?.summary ?? '',
+        ]),
+    },
+    {
+      id: 'family',
+      title: 'Family / future life',
+      keywords: ['family', 'kids', 'marriage', 'wife', 'husband', 'future family'],
+      summary: (items) =>
+        buildCurrentFrontSummary(items, [
+          'Family is not just a distant idea here; recent entries treat it more like a live reference point for present choices.',
+          items[0]?.summary ?? '',
+        ]),
+    },
+  ]
+
+  const fronts = specs
+    .map((spec) => {
+      const matchedEntries = recentEntries.filter((entry) => {
+        const haystack = normalizeWhitespace(`${entry.title} ${entry.summary} ${entry.rawText}`).toLowerCase()
+        return spec.keywords.some((keyword) => haystack.includes(keyword.toLowerCase()))
+      })
+
+      if (!matchedEntries.length) return null
+
+      const score = matchedEntries.reduce((total, entry) => {
+        const recentIndex = recentEntries.findIndex((candidate) => candidate.id === entry.id)
+        return total + recentEntryScore(recentIndex)
+      }, 0)
+
+      return {
+        spec,
+        matchedEntries,
+        score,
+      }
+    })
+    .filter((item): item is { spec: CurrentFrontSpec; matchedEntries: JournalEntry[]; score: number } => Boolean(item))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 3)
+    .map(({ spec, matchedEntries }) => ({
+      id: spec.id,
+      title: spec.title,
+      summary: spec.summary(matchedEntries),
+      entryIds: matchedEntries.map((entry) => entry.id),
+      updatedAt: matchedEntries[0]?.createdAt ?? new Date().toISOString(),
+    }))
+
+  const relationshipPattern = patterns.find((pattern) => patternFamilyKey(pattern) === 'relationship-attunement')
+  if (relationshipPattern && !fronts.some((front) => front.id === 'relationship')) {
+    fronts.push({
+      id: 'relationship',
+      title: 'Relationship / attunement',
+      summary: clipAtWord(
+        relationshipPattern.changeSummary?.[0] ||
+          relationshipPattern.overview ||
+          'Relationship seems live right now, especially around whether closeness feels deeply attuned rather than merely available.',
+        190,
+      ),
+      entryIds: relationshipPattern.entryIds,
+      updatedAt: relationshipPattern.updatedAt,
+    })
+  }
+
+  return fronts
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+    .slice(0, 3)
+}
+
+export function buildPatternsBrief(patterns: PatternSection[], entries: JournalEntry[] = []): PatternsBrief | null {
   if (!patterns.length) return null
 
   const sorted = [...patterns].sort(compareThemePriority)
   const surfacedPatterns = sorted.filter((pattern) => pattern.prominence !== 'quiet')
   const candidatePatterns = surfacedPatterns.length ? surfacedPatterns : sorted.slice(0, 5)
   if (!candidatePatterns.length) return null
+  const currentFronts = buildCurrentFronts(entries, sorted)
 
   const durablePattern = pickBriefPattern(candidatePatterns, scoreBriefDurability)
   const recentPattern = pickBriefPattern(
@@ -2705,6 +2836,7 @@ export function buildPatternsBrief(patterns: PatternSection[]): PatternsBrief | 
 
   return {
     title: 'State of affairs',
+    currentFronts,
     bullets,
     expandedOverview: expandedOverview ?? {
       paragraphs: dedupePatternLines(bullets.map((bullet) => bullet.text))
@@ -3669,15 +3801,21 @@ export async function generatePatternsUpdate(
   thread: Array<{ role: 'user' | 'assistant'; content: string }> = [],
 ): Promise<string> {
   const sortedPatterns = [...patterns].sort(compareThemePriority).slice(0, 5)
-  const brief = buildPatternsBrief(sortedPatterns)
+  const brief = buildPatternsBrief(sortedPatterns, entries)
   const defaultAsk = 'Knowing what you know about me from the journal, what is your take on where things stand right now and what questions matter most?'
   const effectiveMessage = userMessage?.trim() || defaultAsk
   const lifeAreaSummary = summarizePatternLifeAreas(sortedPatterns)
+  const currentFrontSummary = (brief?.currentFronts ?? [])
+    .map((front) => `- ${front.title}: ${front.summary}`)
+    .join('\n') || 'No concrete fronts extracted yet.'
 
   if (!anthropic) {
-    const briefLines = brief?.expandedOverview?.paragraphs?.length
-      ? brief.expandedOverview.paragraphs
-      : brief?.bullets.map((item) => formatPatternSentence(item.text)).slice(0, 2) ?? []
+    const briefLines = [
+      ...(brief?.currentFronts?.slice(0, 2).map((front) => formatPatternSentence(front.summary)) ?? []),
+      ...(brief?.expandedOverview?.paragraphs?.length
+        ? brief.expandedOverview.paragraphs
+        : brief?.bullets.map((item) => formatPatternSentence(item.text)).slice(0, 2) ?? []),
+    ].slice(0, 3)
     const questionLine = brief?.prompt?.text ? `\n\nQuestion worth pressure-testing: ${brief.prompt.text}` : ''
     return `${briefLines.join('\n\n')}${questionLine}`.trim() || 'The journal suggests a few live themes, but there is not enough context yet for a meaningful update.'
   }
@@ -3689,6 +3827,9 @@ Your job:
 - Give a short, fluid update that feels like a sharp companion's take, not a dashboard summary.
 - Synthesize across the journal and current patterns into life-level language.
 - Focus on what seems most alive, what tension matters most, and what questions seem worth sitting with.
+- Distinguish between slower recurring themes and concrete current fronts.
+- Do not force every live concern into one grand unifying theory if the evidence does not support that.
+- If two things may be related but the link is still tentative, say so plainly instead of over-threading them.
 
 Style rules:
 - 2 to 4 short paragraphs max.
@@ -3701,12 +3842,17 @@ Style rules:
 - Do not over-center work/career unless it is clearly the dominant reality in the evidence.
 - Check whether relationship, family, self-trust, embodiment, or life-direction themes are also active, and include them when they materially shape the picture.
 - If the journal contains both work-like and non-work concerns, synthesize the broader life situation instead of narrowing to the easiest work framing.
+- Prefer 2 or 3 clear live truths over one overly clever all-explaining thesis.
+- It is good to keep some fronts separate if that is the honest read.
 
 Living memory:
 ${memoryForPrompt(memoryDoc, 1800)}
 
 Current themes:
 ${sortedPatterns.map((pattern) => `- ${pattern.title}: ${pattern.overview}`).join('\n') || 'None yet'}
+
+Current concrete fronts from recent entries:
+${currentFrontSummary}
 
 Life areas currently represented:
 ${lifeAreaSummary}

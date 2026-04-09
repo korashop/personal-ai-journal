@@ -231,7 +231,7 @@ app.get('/api/bootstrap', async (request, response, next) => {
             memoryDoc: data.memoryDoc,
             resurfacing: chooseResurfacingCard(data.memoryDoc, data.selectedEntry ? [data.selectedEntry] : [], data.highlights),
             patterns: attachedPatterns,
-            patternsBrief: buildPatternsBrief(attachedPatterns),
+            patternsBrief: buildPatternsBrief(attachedPatterns, data.patternEntries),
             mode,
         });
     }

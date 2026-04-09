@@ -112,6 +112,13 @@ export type PatternSection = {
 };
 export type PatternsBrief = {
     title: string;
+    currentFronts?: Array<{
+        id: string;
+        title: string;
+        summary: string;
+        entryIds: string[];
+        updatedAt: string;
+    }>;
     bullets: Array<{
         kind: 'durable' | 'recent' | 'next';
         text: string;

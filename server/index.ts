@@ -307,7 +307,7 @@ app.get('/api/bootstrap', async (request, response, next) => {
         data.highlights,
       ),
       patterns: attachedPatterns,
-      patternsBrief: buildPatternsBrief(attachedPatterns),
+      patternsBrief: buildPatternsBrief(attachedPatterns, data.patternEntries),
       mode,
     })
   } catch (error) {

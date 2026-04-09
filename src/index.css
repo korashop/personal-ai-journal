@@ -1330,6 +1330,10 @@ button {
   gap: 12px;
 }
 
+.pattern-front-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .pattern-home-stack {
   display: flex;
   flex-direction: column;
@@ -1478,6 +1482,13 @@ button {
 .pattern-home-card.quiet {
   border-color: rgba(255, 255, 255, 0.05);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.pattern-front-card {
+  border-color: rgba(142, 184, 199, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(142, 184, 199, 0.06), transparent 44%),
+    rgba(255, 255, 255, 0.03);
 }
 
 .pattern-home-card strong {
