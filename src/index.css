@@ -391,6 +391,10 @@ button {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.split-review-inline {
+  margin-top: 14px;
+}
+
 .ocr-resolution-panel {
   display: flex;
   flex-direction: column;

@@ -202,9 +202,14 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
   const [replaceTargetPage, setReplaceTargetPage] = useState<number | null>(null)
   const [pageRetryBusy, setPageRetryBusy] = useState<number | null>(null)
 
+  const splitSourceText = photos.length
+    ? reviewReady && !rawText.trim()
+      ? transcribedText
+      : ''
+    : rawText
   const splitCandidates = useMemo(
-    () => (reviewReady && !rawText.trim() ? detectSplitCandidates(transcribedText) : []),
-    [rawText, reviewReady, transcribedText],
+    () => detectSplitCandidates(splitSourceText),
+    [splitSourceText],
   )
   const missingOcrPages = useMemo(
     () => detectMissingOcrPages(transcribedPages),
@@ -477,6 +482,63 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
         value={rawText}
       />
 
+      {!photos.length && hasSplitCandidates ? (
+        <div className="split-review split-review-inline">
+          <div className="split-review-header">
+            <div>
+              <p className="subtle-label">Possible entry splits</p>
+              <p className="hint">
+                I found {splitCandidates.length} dated sections in this text. If you split them, each entry will use its detected date and appear in chronological order in the journal.
+              </p>
+            </div>
+            <div className="split-review-actions">
+              <button
+                className={`ghost-button ${!submitAsSplitEntries ? 'selected' : ''}`}
+                onClick={() => {
+                  setSubmitAsSplitEntries(false)
+                  setSplitChoiceTouched(true)
+                }}
+                type="button"
+              >
+                Keep one entry
+              </button>
+              <button
+                className={`ghost-button ${submitAsSplitEntries ? 'selected' : ''}`}
+                onClick={() => {
+                  setSubmitAsSplitEntries(true)
+                  setSplitChoiceTouched(true)
+                }}
+                type="button"
+              >
+                Submit as {splitCandidates.length} entries
+              </button>
+            </div>
+          </div>
+
+          <div className="split-preview-list">
+            {splitCandidates.map((candidate, index) => (
+              <section className="split-preview-card" key={candidate.id}>
+                <div className="split-preview-header">
+                  <strong>{candidate.label}</strong>
+                  <span className="hint">Entry {index + 1}</span>
+                </div>
+                <p className="split-preview-date">
+                  {formatDetectedDate(candidate.createdAt)
+                    ? `Will be dated ${formatDetectedDate(candidate.createdAt)} in the journal`
+                    : 'No date was confidently detected yet'}
+                </p>
+                <p>{candidate.preview}</p>
+              </section>
+            ))}
+          </div>
+          <p className="hint split-submit-state">
+            {submitAsSplitEntries
+              ? `Current submit mode: ${splitCandidates.length} separate dated entries`
+              : 'Current submit mode: one combined entry'}
+          </p>
+        </div>
+      ) : null}
+
       <div className="composer-footer">
         <div
           className={`photo-upload ${photos.length ? 'has-photos' : ''} ${dragActive ? 'drag-active' : ''}`}
@@ -746,7 +808,13 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
             type="submit"
           >
             {busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-            {busy ? 'Analyzing and saving...' : 'Submit entry'}
+            {busy
+              ? submitAsSplitEntries && splitCandidates.length
+                ? `Saving ${splitCandidates.length} entries...`
+                : 'Analyzing and saving...'
+              : submitAsSplitEntries && splitCandidates.length
+                ? `Submit ${splitCandidates.length} entries`
+                : 'Submit entry'}
           </button>
         ) : null}
       </div>
