@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, LoaderCircle, MessageSquareText, Send, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import type { FormEvent } from 'react'
 
 import { createCompanionReply, createPatternReply } from '../lib/api'
-import type { EntryListItem, MemoryDocument, PatternSection, PatternsBrief } from '../types'
+import type { EntryListItem, PatternSection, PatternsBrief } from '../types'
 
 function statusLabel(status: PatternSection['status']) {
   if (status === 'deepening') return 'Deepening'
@@ -78,7 +78,6 @@ function filterDistinctLines(lines: string[], seedText: string) {
 
 type PatternsViewProps = {
   entries: EntryListItem[]
-  memoryDoc: MemoryDocument | null
   patterns: PatternSection[]
   patternsBrief: PatternsBrief | null
   onOpenEntry: (entryId: string) => void
@@ -91,6 +90,28 @@ type ThemeMessage = {
   role: 'user' | 'assistant'
   content: string
   state?: 'pending' | 'complete'
+}
+
+const PATTERN_THREADS_KEY = 'journal-theme-threads'
+const PATTERN_UPDATE_THREAD_KEY = 'journal-patterns-update-thread'
+const PATTERN_UPDATE_META_KEY = 'journal-patterns-update-meta'
+
+function buildTakeSignature(entries: EntryListItem[], patterns: PatternSection[]) {
+  const latestEntries = [...entries]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 8)
+    .map((entry) => `${entry.id}:${entry.createdAt}:${normalizeForComparison(entry.title).slice(0, 36)}`)
+
+  const rankedPatterns = [...patterns]
+    .sort((left, right) => {
+      const leftScore = (left.rankScore ?? 0) + left.entryCount
+      const rightScore = (right.rankScore ?? 0) + right.entryCount
+      return rightScore - leftScore
+    })
+    .slice(0, 8)
+    .map((pattern) => `${pattern.id}:${pattern.updatedAt}:${pattern.entryCount}:${pattern.status}`)
+
+  return [latestEntries.join('|'), rankedPatterns.join('|')].join('::')
 }
 
 export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshAfterThemeReply, patterns, patternsBrief }: PatternsViewProps) {
@@ -106,17 +127,30 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
   const [briefBusy, setBriefBusy] = useState(false)
   const [refreshingThread, setRefreshingThread] = useState(false)
   const [staleSyncAttempts, setStaleSyncAttempts] = useState(0)
+  const [storedTakeSignature, setStoredTakeSignature] = useState<string | null>(null)
+  const pendingLocalTakeSyncRef = useRef(false)
+  const autoRefreshSignatureRef = useRef<string | null>(null)
+
+  const currentTakeSignature = useMemo(
+    () => buildTakeSignature(entries, patterns),
+    [entries, patterns],
+  )
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem('journal-theme-threads')
+      const stored = window.localStorage.getItem(PATTERN_THREADS_KEY)
       if (stored) {
         setThemeThreads(JSON.parse(stored) as Record<string, ThemeMessage[]>)
       }
-      const storedUpdateThread = window.localStorage.getItem('journal-patterns-update-thread')
+      const storedUpdateThread = window.localStorage.getItem(PATTERN_UPDATE_THREAD_KEY)
       if (storedUpdateThread) {
         setUpdateThread(JSON.parse(storedUpdateThread) as ThemeMessage[])
         setShowBrief(true)
+      }
+      const storedUpdateMeta = window.localStorage.getItem(PATTERN_UPDATE_META_KEY)
+      if (storedUpdateMeta) {
+        const parsed = JSON.parse(storedUpdateMeta) as { signature?: string | null }
+        setStoredTakeSignature(parsed.signature ?? null)
       }
     } catch {
       // Ignore local storage issues and keep the thread in-memory only.
@@ -125,12 +159,17 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('journal-theme-threads', JSON.stringify(themeThreads))
-      window.localStorage.setItem('journal-patterns-update-thread', JSON.stringify(updateThread))
+      window.localStorage.setItem(PATTERN_THREADS_KEY, JSON.stringify(themeThreads))
+      window.localStorage.setItem(PATTERN_UPDATE_THREAD_KEY, JSON.stringify(updateThread))
+      if (updateThread.length && storedTakeSignature) {
+        window.localStorage.setItem(PATTERN_UPDATE_META_KEY, JSON.stringify({ signature: storedTakeSignature }))
+      } else if (!updateThread.length) {
+        window.localStorage.removeItem(PATTERN_UPDATE_META_KEY)
+      }
     } catch {
       // Ignore local storage issues and keep the thread in-memory only.
     }
-  }, [themeThreads, updateThread])
+  }, [storedTakeSignature, themeThreads, updateThread])
 
   useEffect(() => {
     if (!patterns.length) {
@@ -151,6 +190,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     if (!patternsBrief) {
       setShowBrief(false)
       setUpdateThread([])
+      setStoredTakeSignature(null)
     }
   }, [patternsBrief])
 
@@ -288,11 +328,6 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     ].filter((group) => group.patterns.length)
   }, [patterns])
 
-  const currentFronts = useMemo(
-    () => (patternsBrief?.currentFronts ?? []).filter((front) => front.entryIds.length),
-    [patternsBrief?.currentFronts],
-  )
-
   const engagementPrompts = useMemo(
     () =>
       filterDistinctLines(
@@ -317,7 +352,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
     setMessage(nextMessage ?? '')
   }
 
-  async function handleGenerateBrief() {
+  const handleGenerateBrief = useCallback(async () => {
     try {
       setBriefBusy(true)
       await onGenerateBrief()
@@ -330,12 +365,35 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
           state: 'complete',
         },
       ])
+      setStoredTakeSignature(currentTakeSignature)
+      autoRefreshSignatureRef.current = currentTakeSignature
       setUpdateMessage('')
       setShowBrief(true)
     } finally {
       setBriefBusy(false)
     }
-  }
+  }, [currentTakeSignature, onGenerateBrief])
+
+  useEffect(() => {
+    if (!showBrief || !updateThread.length || briefBusy) return
+
+    if (pendingLocalTakeSyncRef.current) {
+      pendingLocalTakeSyncRef.current = false
+      setStoredTakeSignature(currentTakeSignature)
+      autoRefreshSignatureRef.current = currentTakeSignature
+      return
+    }
+
+    if (storedTakeSignature === currentTakeSignature) {
+      autoRefreshSignatureRef.current = currentTakeSignature
+      return
+    }
+
+    if (autoRefreshSignatureRef.current === currentTakeSignature) return
+    autoRefreshSignatureRef.current = currentTakeSignature
+
+    void handleGenerateBrief()
+  }, [briefBusy, currentTakeSignature, handleGenerateBrief, showBrief, storedTakeSignature, updateThread.length])
 
   async function handleUpdateSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -384,6 +442,7 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
             : threadMessage,
         ),
       )
+      pendingLocalTakeSyncRef.current = true
       void onGenerateBrief()
     } catch {
       setUpdateThread((current) =>
@@ -583,40 +642,10 @@ export function PatternsView({ entries, onGenerateBrief, onOpenEntry, onRefreshA
                   )
                 ) : null}
 
-                {currentFronts.length ? (
-                  <section className="pattern-tier-section">
-                    <div className="pattern-tier-header">
-                      <p className="subtle-label">Current fronts</p>
-                      <p className="pattern-tier-summary">
-                        Concrete life areas that look especially active in the most recent entries, even if they are not yet durable themes.
-                      </p>
-                    </div>
-                    <div className="pattern-home-list pattern-front-list">
-                      {currentFronts.map((front) => (
-                        <button
-                          className="pattern-home-card pattern-front-card"
-                          key={front.id}
-                          onClick={() => onOpenEntry(front.entryIds[0])}
-                          type="button"
-                        >
-                          <div className="pattern-home-meta">
-                            <strong>{front.title}</strong>
-                            <span className="pattern-timestamp">Recent front</span>
-                          </div>
-                          <p className="pattern-home-preview">{shortDisplayText(front.summary, 170)}</p>
-                          <small>{front.entryIds.length} related entr{front.entryIds.length === 1 ? 'y' : 'ies'}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-
                 {patternGroups.map((group) => (
                   <section className="pattern-tier-section" key={group.id}>
                   <div className="pattern-tier-header">
-                    <p className="subtle-label">
-                      {group.id === 'dominant' && currentFronts.length ? 'Most live themes' : group.title}
-                    </p>
+                    <p className="subtle-label">{group.title}</p>
                   </div>
                   <div className="pattern-home-list">
                     {group.patterns.map((pattern) => {

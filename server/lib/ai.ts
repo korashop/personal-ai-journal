@@ -3800,7 +3800,7 @@ export async function generatePatternsUpdate(
   userMessage?: string,
   thread: Array<{ role: 'user' | 'assistant'; content: string }> = [],
 ): Promise<string> {
-  const sortedPatterns = [...patterns].sort(compareThemePriority).slice(0, 5)
+  const sortedPatterns = [...patterns].sort(compareThemePriority).slice(0, 8)
   const brief = buildPatternsBrief(sortedPatterns, entries)
   const defaultAsk = 'Knowing what you know about me from the journal, what is your take on where things stand right now and what questions matter most?'
   const effectiveMessage = userMessage?.trim() || defaultAsk

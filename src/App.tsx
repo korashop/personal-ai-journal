@@ -282,7 +282,6 @@ export default function App() {
           {view === 'patterns' ? (
             <PatternsView
               entries={entries}
-              memoryDoc={bootstrap.memoryDoc}
               patternsBrief={bootstrap.patternsBrief}
               onGenerateBrief={async () => {
                 await loadBootstrap(null, { preserveSelection: true })
