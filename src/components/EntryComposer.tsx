@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, FileText, ImagePlus, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
-import type { DragEvent, FormEvent } from 'react'
+import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 
 import { transcribePhotos } from '../lib/api'
 import type { EntrySource } from '../types'
@@ -167,6 +167,7 @@ function getCaptureStatusText(params: {
 
 export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const replaceInputRef = useRef<HTMLInputElement | null>(null)
   const [rawText, setRawText] = useState('')
   const [source, setSource] = useState<EntrySource>('typed')
   const [photos, setPhotos] = useState<File[]>([])
@@ -177,6 +178,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
   const [reviewMeta, setReviewMeta] = useState<{ imageCount: number; failedCount: number } | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [submitAsSplitEntries, setSubmitAsSplitEntries] = useState(false)
+  const [replaceTargetPage, setReplaceTargetPage] = useState<number | null>(null)
 
   const splitCandidates = useMemo(
     () => (reviewReady && !rawText.trim() ? detectSplitCandidates(transcribedText) : []),
@@ -194,6 +196,14 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     photoCount: photos.length,
     splitCount: splitCandidates.length,
   })
+
+  function resetReviewState(nextError: string | null = null) {
+    setReviewReady(false)
+    setTranscribedText('')
+    setReviewError(nextError)
+    setReviewMeta(null)
+    setSubmitAsSplitEntries(false)
+  }
 
   function appendPhotos(nextFiles: File[]) {
     let nextError: string | null = null
@@ -221,11 +231,7 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
 
       return merged
     })
-    setReviewReady(false)
-    setTranscribedText('')
-    setReviewError(nextError)
-    setReviewMeta(null)
-    setSubmitAsSplitEntries(false)
+    resetReviewState(nextError)
   }
 
   function movePhoto(index: number, direction: -1 | 1) {
@@ -236,22 +242,14 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
       ;[next[index], next[nextIndex]] = [next[nextIndex], next[index]]
       return next
     })
-    setReviewReady(false)
-    setTranscribedText('')
-    setReviewError(null)
-    setReviewMeta(null)
-    setSubmitAsSplitEntries(false)
+    resetReviewState()
   }
 
   function removePhoto(target: File) {
     setPhotos((current) =>
       current.filter((item) => `${item.name}-${item.lastModified}` !== `${target.name}-${target.lastModified}`),
     )
-    setReviewReady(false)
-    setTranscribedText('')
-    setReviewError(null)
-    setReviewMeta(null)
-    setSubmitAsSplitEntries(false)
+    resetReviewState()
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -295,13 +293,12 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     setSource('photo')
   }
 
-  async function handleReviewTranscription() {
-    if (!photos.length) return
-
+  async function runPhotoTranscription(nextPhotos: File[]) {
+    if (!nextPhotos.length) return
     try {
       setReviewBusy(true)
       setReviewError(null)
-      const result = await transcribePhotos(photos)
+      const result = await transcribePhotos(nextPhotos)
       setTranscribedText(result.transcript)
       setReviewMeta({ imageCount: result.imageCount, failedCount: result.failedCount })
       setReviewReady(result.anySucceeded)
@@ -316,6 +313,30 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
     } finally {
       setReviewBusy(false)
     }
+  }
+
+  async function handleReviewTranscription() {
+    await runPhotoTranscription(photos)
+  }
+
+  function handleReplacePage(pageNumber: number) {
+    setReplaceTargetPage(pageNumber)
+    replaceInputRef.current?.click()
+  }
+
+  async function handleReplaceInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const replacement = event.target.files?.[0]
+    const pageNumber = replaceTargetPage
+    event.target.value = ''
+
+    if (!replacement || !pageNumber) return
+
+    const nextPhotos = photos.map((photo, index) => (index === pageNumber - 1 ? replacement : photo))
+    setPhotos(nextPhotos)
+    setSource('photo')
+    resetReviewState(`Replaced page ${pageNumber}. Re-transcribing now...`)
+    setReplaceTargetPage(null)
+    await runPhotoTranscription(nextPhotos)
   }
 
   return (
@@ -420,12 +441,110 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
             ref={fileInputRef}
             type="file"
           />
+          <input
+            accept="image/*,.heic,.heif"
+            hidden
+            onChange={(event) => {
+              void handleReplaceInputChange(event)
+            }}
+            ref={replaceInputRef}
+            type="file"
+          />
           <div className="capture-steps">
             <span className={`capture-step ${photos.length ? 'done' : ''}`}>1. Add pages</span>
             <span className={`capture-step ${reviewReady ? 'done' : photos.length ? 'active' : ''}`}>2. Transcribe images</span>
             <span className={`capture-step ${busy ? 'active' : reviewReady ? 'active' : ''}`}>3. Analyze and save</span>
           </div>
           <p className={`hint capture-status ${reviewBusy || busy ? 'active' : ''}`}>{captureStatusText}</p>
+          {reviewReady ? (
+            <div className="transcription-review transcription-review-prominent">
+              <div className="transcription-review-header">
+                <div>
+                  <p className="subtle-label">Transcription review</p>
+                  <p className="hint transcription-review-hint">
+                    This is the main review step before submission. Fix OCR issues here, and add a date heading on its own line when a new journal day should become a separate entry.
+                  </p>
+                </div>
+                <span className="hint">
+                  {missingOcrPages.length
+                    ? `Fill in or replace ${missingOcrPages.length} missing page${missingOcrPages.length === 1 ? '' : 's'}`
+                    : 'Review, edit, then submit'}
+                </span>
+              </div>
+              {missingOcrPages.length ? (
+                <div className="ocr-missing-panel">
+                  <p className="ocr-missing-title">These pages still need attention</p>
+                  <p className="hint">
+                    Replace the failed image directly, or edit the placeholder text below. Replacing a page will automatically re-transcribe the full set in order.
+                  </p>
+                  <div className="ocr-missing-list">
+                    {missingOcrPages.map((item) => (
+                      <div className="ocr-missing-chip-row" key={`${item.pageNumber}-${item.fileName ?? 'page'}`}>
+                        <span className="ocr-missing-chip">
+                          Page {item.pageNumber}{item.fileName ? ` - ${item.fileName}` : ''}
+                        </span>
+                        <button
+                          className="ghost-button compact-button"
+                          disabled={busy || reviewBusy}
+                          onClick={() => handleReplacePage(item.pageNumber)}
+                          type="button"
+                        >
+                          Replace image
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <textarea
+                className="entry-textarea transcription-textarea transcription-textarea-prominent"
+                onChange={(event) => setTranscribedText(event.target.value)}
+                rows={18}
+                value={transcribedText}
+              />
+
+              {splitCandidates.length ? (
+                <div className="split-review">
+                  <div className="split-review-header">
+                    <div>
+                      <p className="subtle-label">Possible entry splits</p>
+                      <p className="hint">
+                        I found {splitCandidates.length} dated sections in this reviewed text. Keep one combined entry or submit them separately.
+                      </p>
+                    </div>
+                    <div className="split-review-actions">
+                      <button
+                        className={`ghost-button ${!submitAsSplitEntries ? 'selected' : ''}`}
+                        onClick={() => setSubmitAsSplitEntries(false)}
+                        type="button"
+                      >
+                        Keep one entry
+                      </button>
+                      <button
+                        className={`ghost-button ${submitAsSplitEntries ? 'selected' : ''}`}
+                        onClick={() => setSubmitAsSplitEntries(true)}
+                        type="button"
+                      >
+                        Submit as {splitCandidates.length} entries
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="split-preview-list">
+                    {splitCandidates.map((candidate, index) => (
+                      <section className="split-preview-card" key={candidate.id}>
+                        <div className="split-preview-header">
+                          <strong>{candidate.label}</strong>
+                          <span className="hint">Entry {index + 1}</span>
+                        </div>
+                        <p>{candidate.preview}</p>
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {photos.length ? (
             <div className="photo-page-list">
               {photos.map((photo, index) => (
@@ -469,81 +588,6 @@ export function EntryComposer({ busy, submitPhase, onSubmit }: EntryComposerProp
           ) : null}
 
           {reviewError ? <p className="review-error">{reviewError}</p> : null}
-
-          {reviewReady ? (
-            <div className="transcription-review">
-              <div className="transcription-review-header">
-                <p className="subtle-label">Transcription review</p>
-                <span className="hint">
-                  {missingOcrPages.length
-                    ? `Fill in ${missingOcrPages.length} missing page${missingOcrPages.length === 1 ? '' : 's'} below, then submit`
-                    : 'Edit here, then submit'}
-                </span>
-              </div>
-              {missingOcrPages.length ? (
-                <div className="ocr-missing-panel">
-                  <p className="ocr-missing-title">These pages still need manual fill-in</p>
-                  <p className="hint">
-                    The upload can still finish, but analysis will be weaker unless you replace the placeholder text for these pages in the review box below.
-                  </p>
-                  <div className="ocr-missing-list">
-                    {missingOcrPages.map((item) => (
-                      <span className="ocr-missing-chip" key={`${item.pageNumber}-${item.fileName ?? 'page'}`}>
-                        Page {item.pageNumber}{item.fileName ? ` - ${item.fileName}` : ''}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              <textarea
-                className="entry-textarea transcription-textarea"
-                onChange={(event) => setTranscribedText(event.target.value)}
-                rows={12}
-                value={transcribedText}
-              />
-
-              {splitCandidates.length ? (
-                <div className="split-review">
-                  <div className="split-review-header">
-                    <div>
-                      <p className="subtle-label">Possible entry splits</p>
-                      <p className="hint">
-                        I found {splitCandidates.length} dated sections in this reviewed text. You can keep one combined entry or submit them separately.
-                      </p>
-                    </div>
-                    <div className="split-review-actions">
-                      <button
-                        className={`ghost-button ${!submitAsSplitEntries ? 'selected' : ''}`}
-                        onClick={() => setSubmitAsSplitEntries(false)}
-                        type="button"
-                      >
-                        Keep one entry
-                      </button>
-                      <button
-                        className={`ghost-button ${submitAsSplitEntries ? 'selected' : ''}`}
-                        onClick={() => setSubmitAsSplitEntries(true)}
-                        type="button"
-                      >
-                        Submit as {splitCandidates.length} entries
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="split-preview-list">
-                    {splitCandidates.map((candidate, index) => (
-                      <section className="split-preview-card" key={candidate.id}>
-                        <div className="split-preview-header">
-                          <strong>{candidate.label}</strong>
-                          <span className="hint">Entry {index + 1}</span>
-                        </div>
-                        <p>{candidate.preview}</p>
-                      </section>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
         </div>
 
         <button
